@@ -4,7 +4,7 @@ from typing import Optional
 import typer
 
 from backport_harness import __version__
-from backport_harness.config import load_config
+from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
 from backport_harness.storage import init_database
 
@@ -54,15 +54,7 @@ def db_init(ctx: typer.Context) -> None:
 
 def _resolve_sqlite_path(ctx: typer.Context) -> Path:
     config = ctx.obj.get("config") if ctx.obj else None
-    if not isinstance(config, dict):
+    if not isinstance(config, HarnessConfig):
         return DEFAULT_SQLITE_PATH
 
-    storage_config = config.get("storage")
-    if not isinstance(storage_config, dict):
-        return DEFAULT_SQLITE_PATH
-
-    sqlite_path = storage_config.get("sqlite_path")
-    if not sqlite_path:
-        return DEFAULT_SQLITE_PATH
-
-    return Path(sqlite_path)
+    return config.storage.sqlite_path

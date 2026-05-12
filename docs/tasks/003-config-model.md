@@ -14,6 +14,7 @@ Implement typed config loading with strict defaults, path normalization, GitHub 
 - Reject any config that embeds a GitHub token directly in YAML.
 - Resolve workspace paths to absolute paths during config load.
 - Validate configured repo, worktree, task, report, and storage paths against configured forbidden private prefixes.
+- Update `README.md` with current implementation status and Linux test commands.
 
 ## Expected Behavior
 
@@ -25,6 +26,7 @@ Implement typed config loading with strict defaults, path normalization, GitHub 
 ## Affected Modules or Commands
 
 - `backport_harness/config.py`
+- `README.md`
 - CLI config loading path
 - Tests: `tests/test_config.py`
 
@@ -36,10 +38,10 @@ Implement typed config loading with strict defaults, path normalization, GitHub 
 - Verify token-like YAML fields are rejected.
 - Verify relative paths are resolved.
 - Verify forbidden path overlaps are rejected.
+- Verify documented Linux test commands match the current project setup.
 
 ## Assumptions and Explicit Non-goals
 
 - Pydantic is preferred if already selected for result schemas; otherwise use dataclasses plus validation.
 - This milestone may define security config data, but reusable security helper functions belong to the worktree/Codex-related milestones unless needed here.
 - This milestone does not clone repos, create worktrees, scan GitHub, or invoke Codex.
-
