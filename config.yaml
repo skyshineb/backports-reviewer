@@ -1,0 +1,35 @@
+github:
+  owner: apache
+  repo: hudi
+  branches:
+    - master
+    - "0.15"
+  token_env: GITHUB_TOKEN
+  request_delay_seconds: 1.0
+  page_delay_seconds: 2.0
+  max_retries: 5
+  backoff_multiplier: 2.0
+  respect_rate_limit: true
+
+local_repo:
+  upstream_url: https://github.com/apache/hudi.git
+  repo_dir: ./workspace/upstream
+  worktree_dir: ./workspace/worktrees
+
+codex:
+  command: codex
+  mode: exec
+  timeout_seconds: 7200
+  max_attempts_per_pr: 2
+  result_file: output/codex_result.json
+
+analysis:
+  default_limit: 5
+  stale_timeout_seconds: 7200
+
+reports:
+  output_dir: ./reports
+
+storage:
+  sqlite_path: ./workspace/backport_harness.sqlite3
+
