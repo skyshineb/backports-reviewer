@@ -6,8 +6,13 @@ import typer
 from backport_harness import __version__
 from backport_harness.config import load_config
 from backport_harness.logging_config import configure_logging
+from backport_harness.storage import init_database
 
 app = typer.Typer(help="Public upstream backport review harness.")
+db_app = typer.Typer(help="Manage the harness SQLite database.")
+app.add_typer(db_app, name="db")
+
+DEFAULT_SQLITE_PATH = Path("workspace/backport_harness.sqlite3")
 
 
 @app.callback()
@@ -38,3 +43,26 @@ def version() -> None:
     """Print the backport harness version."""
     typer.echo(__version__)
 
+
+@db_app.command("init")
+def db_init(ctx: typer.Context) -> None:
+    """Create or update the harness SQLite database."""
+    sqlite_path = _resolve_sqlite_path(ctx)
+    init_database(sqlite_path)
+    typer.echo(f"Initialized database at {sqlite_path}")
+
+
+def _resolve_sqlite_path(ctx: typer.Context) -> Path:
+    config = ctx.obj.get("config") if ctx.obj else None
+    if not isinstance(config, dict):
+        return DEFAULT_SQLITE_PATH
+
+    storage_config = config.get("storage")
+    if not isinstance(storage_config, dict):
+        return DEFAULT_SQLITE_PATH
+
+    sqlite_path = storage_config.get("sqlite_path")
+    if not sqlite_path:
+        return DEFAULT_SQLITE_PATH
+
+    return Path(sqlite_path)
