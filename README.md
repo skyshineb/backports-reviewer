@@ -2,33 +2,42 @@
 
 `backports-reviewer` is a Python harness for building a public-OSS backport review queue. The harness is intentionally split into small implementation milestones under `docs/tasks/`.
 
-Task 001 provides only the project skeleton:
+## Current Implementation Status
+
+The current implementation covers milestones 001 through 003:
 
 - Python package metadata
 - `backport-harness` CLI entry point
 - basic logging setup
-- placeholder YAML config loading
-- focused CLI tests
+- SQLite database initialization and idempotent migrations
+- typed YAML config loading with required-field validation
+- documented config defaults, including Codex and stale-run timeouts
+- GitHub token lookup from the configured environment variable
+- relative path normalization for configured workspace paths
+- forbidden private path prefix checks
+- focused CLI, storage, and config tests
 
-It does not implement GitHub scanning, SQLite storage, Codex execution, worktrees, reports, retries, or strict config validation.
+It does not yet implement GitHub scanning, saved-PR listing or inspection, Codex execution, worktrees, reports, retries, or human review commands.
 
-## Install
+## Linux Setup
 
 ```sh
-python -m pip install -e ".[test]"
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[test]"
 ```
 
 ## Usage
 
 ```sh
-backport-harness --help
-backport-harness version
-backport-harness --config config.yaml version
+.venv/bin/backport-harness --help
+.venv/bin/backport-harness version
+.venv/bin/backport-harness --config config.yaml version
+.venv/bin/backport-harness --config config.yaml db init
 ```
 
-## Test
+## Linux Test Commands
 
 ```sh
-pytest
+.venv/bin/pytest
+.venv/bin/pytest tests/test_config.py tests/test_cli.py tests/test_storage.py
 ```
-
