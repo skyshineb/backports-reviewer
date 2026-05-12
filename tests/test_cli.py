@@ -13,6 +13,7 @@ def test_help_shows_commands() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
+    assert "db" in result.output
     assert "version" in result.output
 
 
@@ -39,3 +40,18 @@ def test_verbose_logging_option_does_not_crash() -> None:
     assert result.exit_code == 0
     assert __version__ in result.output
 
+
+def test_db_init_creates_configured_database(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"storage:\n  sqlite_path: {sqlite_path}\n",
+        encoding="utf-8",
+    )
+
+    first_result = runner.invoke(app, ["--config", str(config_path), "db", "init"])
+    second_result = runner.invoke(app, ["--config", str(config_path), "db", "init"])
+
+    assert first_result.exit_code == 0
+    assert second_result.exit_code == 0
+    assert sqlite_path.is_file()
