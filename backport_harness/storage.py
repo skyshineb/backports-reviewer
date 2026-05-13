@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
@@ -11,6 +12,18 @@ from backport_harness.github_client import GitHubChangedFile, GitHubPullRequest
 MIGRATIONS_PACKAGE = "backport_harness.migrations"
 MIGRATION_SUFFIX = ".sql"
 QUEUE_STATUS_QUEUED = "QUEUED_FOR_ANALYSIS"
+
+
+@dataclass(frozen=True)
+class SavedPullRequest:
+    github_pr_number: int
+    github_pr_url: str
+    title: str
+    target_branch: str
+    merged_at: str
+    queue_status: str
+    priority: int
+    latest_decision: str | None
 
 
 def connect(sqlite_path: Path) -> sqlite3.Connection:
@@ -203,6 +216,101 @@ def create_analysis_queue_row_if_missing(
         """,
         (pr_id, QUEUE_STATUS_QUEUED, 100, 0, now, now),
     )
+
+
+def list_saved_pull_requests(
+    connection: sqlite3.Connection,
+    *,
+    branch: str | None = None,
+    status: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    limit: int | None = None,
+    order_by: str = "merged-at",
+) -> list[SavedPullRequest]:
+    where_clauses = []
+    parameters: list[object] = []
+
+    if branch is not None:
+        where_clauses.append("prs.target_branch = ?")
+        parameters.append(branch)
+
+    if status is not None:
+        where_clauses.append("analysis_queue.status = ?")
+        parameters.append(status)
+
+    if from_date is not None:
+        where_clauses.append("prs.merged_at >= ?")
+        parameters.append(f"{from_date}T00:00:00Z")
+
+    if to_date is not None:
+        where_clauses.append("prs.merged_at <= ?")
+        parameters.append(f"{to_date}T23:59:59Z")
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    order_sql = {
+        "merged-at": "prs.merged_at ASC",
+        "branch": "prs.target_branch ASC, prs.merged_at ASC",
+        "priority": "analysis_queue.priority ASC, prs.merged_at ASC",
+        "status": "analysis_queue.status ASC, prs.merged_at ASC",
+    }[order_by]
+
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = "LIMIT ?"
+        parameters.append(limit)
+
+    cursor = connection.execute(
+        f"""
+        WITH latest_decisions AS (
+            SELECT ranked.pr_id, ranked.decision
+            FROM (
+                SELECT
+                    decisions.pr_id,
+                    decisions.decision,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY decisions.pr_id
+                        ORDER BY decisions.created_at DESC, decisions.id DESC
+                    ) AS row_number
+                FROM decisions
+            ) AS ranked
+            WHERE ranked.row_number = 1
+        )
+        SELECT
+            prs.github_pr_number,
+            prs.github_pr_url,
+            prs.title,
+            prs.target_branch,
+            prs.merged_at,
+            analysis_queue.status,
+            analysis_queue.priority,
+            latest_decisions.decision
+        FROM prs
+        JOIN analysis_queue ON analysis_queue.pr_id = prs.id
+        LEFT JOIN latest_decisions ON latest_decisions.pr_id = prs.id
+        {where_sql}
+        ORDER BY {order_sql}
+        {limit_sql}
+        """,
+        parameters,
+    )
+
+    return [
+        SavedPullRequest(
+            github_pr_number=int(row[0]),
+            github_pr_url=str(row[1]),
+            title=str(row[2]),
+            target_branch=str(row[3]),
+            merged_at=str(row[4]),
+            queue_status=str(row[5]),
+            priority=int(row[6]),
+            latest_decision=row[7],
+        )
+        for row in cursor.fetchall()
+    ]
 
 
 def is_test_file(filename: str) -> bool:

@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from backport_harness import __version__
+from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
 from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
 from backport_harness.scanner import scan_pull_requests
@@ -87,6 +88,63 @@ def scan(
     typer.echo(
         f"Scanned {len(summary.branches)} branch(es), "
         f"saw {summary.prs_seen} PR(s), saved {summary.prs_saved} PR(s)."
+    )
+
+
+@app.command("list-prs")
+def list_prs(
+    ctx: typer.Context,
+    branch: Optional[str] = typer.Option(
+        None,
+        "--branch",
+        help="Saved PR target branch to display.",
+    ),
+    status: Optional[str] = typer.Option(
+        None,
+        "--status",
+        help="Analysis queue status to display.",
+    ),
+    from_date: Optional[str] = typer.Option(
+        None,
+        "--from-date",
+        help="Inclusive merged_at start date in YYYY-MM-DD format.",
+    ),
+    to_date: Optional[str] = typer.Option(
+        None,
+        "--to-date",
+        help="Inclusive merged_at end date in YYYY-MM-DD format.",
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Maximum number of PRs to display.",
+    ),
+    order_by: str = typer.Option(
+        "merged-at",
+        "--order-by",
+        help="Ordering: merged-at, branch, priority, or status.",
+    ),
+) -> None:
+    """List saved PRs from the local SQLite database."""
+    if from_date is not None:
+        _validate_date("from-date", from_date)
+    if to_date is not None:
+        _validate_date("to-date", to_date)
+    if limit is not None and limit < 1:
+        raise typer.BadParameter("limit must be a positive integer.")
+    if order_by not in VALID_ORDER_BY:
+        raise typer.BadParameter(
+            "order-by must be one of: branch, merged-at, priority, status."
+        )
+
+    render_list_prs(
+        sqlite_path=_resolve_sqlite_path(ctx),
+        branch=branch,
+        status=status,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        order_by=order_by,
     )
 
 
