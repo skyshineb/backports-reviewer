@@ -18,9 +18,10 @@ The current implementation covers milestones 001 through 005:
 - slow, polite GitHub scanning for public upstream merged PRs
 - SQLite storage for PR metadata, changed files, scan audit rows, and analysis queue rows
 - saved PR listing with branch, queue status, date, limit, and ordering filters
+- detailed saved PR inspection with changed files, queue state, decisions, evidence, logs, tests, and review status
 - focused CLI, storage, and config tests
 
-It does not yet implement saved-PR inspection, Codex execution, worktrees, reports, retries, or human review commands.
+It does not yet implement Codex execution, worktrees, reports, retries, or human review commands.
 
 ## Linux Setup
 
@@ -88,12 +89,23 @@ export GITHUB_TOKEN=...
 - Supported `--order-by` values are `merged-at`, `branch`, `priority`, and `status`.
 - It does not scan GitHub, invoke Codex, or modify queue state.
 
+### Inspect One Saved PR
+
+```sh
+.venv/bin/backport-harness --config config.yaml inspect --pr 12345
+```
+
+- `inspect` reads one saved PR from the local SQLite database.
+- It shows PR metadata, changed files, queue state, latest decision, evidence, analysis log paths, test runs, and human review status when present.
+- It does not scan GitHub, invoke Codex, or modify queue state.
+
 ### Current Workflow
 
 ```sh
 .venv/bin/backport-harness --config config.yaml db init
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
 .venv/bin/backport-harness --config config.yaml list-prs --limit 20
+.venv/bin/backport-harness --config config.yaml inspect --pr 12345
 ```
 
 ## Linux Test Commands

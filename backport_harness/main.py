@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from backport_harness import __version__
+from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
 from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
@@ -146,6 +147,22 @@ def list_prs(
         limit=limit,
         order_by=order_by,
     )
+
+
+@app.command("inspect")
+def inspect(
+    ctx: typer.Context,
+    pr: int = typer.Option(
+        ...,
+        "--pr",
+        help="GitHub PR number to inspect.",
+    ),
+) -> None:
+    """Inspect one saved PR from the local SQLite database."""
+    if pr < 1:
+        raise typer.BadParameter("pr must be a positive integer.")
+
+    render_inspect_pr(sqlite_path=_resolve_sqlite_path(ctx), pr_number=pr)
 
 
 @db_app.command("init")

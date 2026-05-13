@@ -50,6 +50,7 @@ def test_help_shows_commands() -> None:
 
     assert result.exit_code == 0
     assert "db" in result.output
+    assert "inspect" in result.output
     assert "list-prs" in result.output
     assert "scan" in result.output
     assert "version" in result.output
@@ -268,7 +269,104 @@ def test_list_prs_rejects_invalid_limit(tmp_path: Path) -> None:
     assert "positive integer" in result.output
 
 
-def _insert_saved_pr(sqlite_path: Path) -> None:
+def test_inspect_reports_missing_pr(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "inspect",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "No saved PR found for #12345" in result.output
+
+
+def test_inspect_rejects_invalid_pr_number(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "inspect",
+            "--pr",
+            "0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "positive integer" in result.output
+
+
+def test_inspect_displays_pre_analysis_pr(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, with_file=True)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "inspect",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "#12345" in result.output
+    assert "Fix compaction bug" in result.output
+    assert "QUEUED_FOR_ANALYSIS" in result.output
+    assert "src/test/TestCompaction.java" in result.output
+    assert "No decision recorded yet." in result.output
+
+
+def test_inspect_displays_post_analysis_details(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, with_file=True, with_analysis=True)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "inspect",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "MASTER_NOT_APPLICABLE" in result.output
+    assert "Affected file is absent on 0.15" in result.output
+    assert "workspace/tasks/pr-12345/output/stdout.log" in result.output
+    assert "mvn test" in result.output
+    assert "accepted_for_backport" in result.output
+
+
+def _insert_saved_pr(
+    sqlite_path: Path,
+    *,
+    with_file: bool = False,
+    with_analysis: bool = False,
+) -> None:
     with connect(sqlite_path) as connection:
         cursor = connection.execute(
             """
@@ -315,3 +413,182 @@ def _insert_saved_pr(sqlite_path: Path) -> None:
                 "2024-01-01T00:00:00Z",
             ),
         )
+        if with_file:
+            connection.execute(
+                """
+                INSERT INTO pr_files(
+                    pr_id,
+                    filename,
+                    status,
+                    additions,
+                    deletions,
+                    is_test_file,
+                    is_docs_file,
+                    is_ci_file
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pr_id,
+                    "src/test/TestCompaction.java",
+                    "modified",
+                    10,
+                    2,
+                    1,
+                    0,
+                    0,
+                ),
+            )
+        if with_analysis:
+            analysis_run_id = _insert_analysis_details(connection, pr_id=pr_id)
+            decision_id = _insert_decision_details(
+                connection,
+                pr_id=pr_id,
+                analysis_run_id=analysis_run_id,
+            )
+            _insert_evidence_details(connection, decision_id=decision_id)
+            _insert_test_details(connection, analysis_run_id=analysis_run_id)
+            _insert_review_details(connection, pr_id=pr_id)
+
+
+def _insert_analysis_details(connection, *, pr_id: int) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO analysis_runs(
+            pr_id,
+            run_id,
+            started_at,
+            finished_at,
+            codex_exit_code,
+            status,
+            task_dir,
+            result_json_path,
+            notes_path,
+            stdout_log_path,
+            stderr_log_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            "run-1",
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:10:00Z",
+            0,
+            "DONE",
+            "workspace/tasks/pr-12345",
+            "workspace/tasks/pr-12345/output/codex_result.json",
+            "workspace/tasks/pr-12345/output/notes.md",
+            "workspace/tasks/pr-12345/output/stdout.log",
+            "workspace/tasks/pr-12345/output/stderr.log",
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def _insert_decision_details(
+    connection,
+    *,
+    pr_id: int,
+    analysis_run_id: int,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO decisions(
+            pr_id,
+            analysis_run_id,
+            decision,
+            confidence,
+            bugfix_classification,
+            applies_to_oss_015,
+            reason,
+            human_action,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            analysis_run_id,
+            "MASTER_NOT_APPLICABLE",
+            "high",
+            "bugfix",
+            0,
+            "Affected file is absent on 0.15",
+            "No action required",
+            "2024-01-01T00:10:00Z",
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def _insert_evidence_details(connection, *, decision_id: int) -> None:
+    connection.execute(
+        """
+        INSERT INTO evidence(
+            decision_id,
+            evidence_type,
+            description,
+            file_path,
+            command,
+            exit_code,
+            log_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            decision_id,
+            "file",
+            "Affected file is absent on 0.15",
+            "src/main/Hoodie.java",
+            "grep Hoodie",
+            1,
+            "workspace/tasks/pr-12345/output/evidence.log",
+        ),
+    )
+
+
+def _insert_test_details(connection, *, analysis_run_id: int) -> None:
+    connection.execute(
+        """
+        INSERT INTO test_runs(
+            analysis_run_id,
+            phase,
+            command,
+            exit_code,
+            result,
+            log_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            analysis_run_id,
+            "after_fix",
+            "mvn test",
+            0,
+            "passed",
+            "workspace/tasks/pr-12345/output/test.log",
+        ),
+    )
+
+
+def _insert_review_details(connection, *, pr_id: int) -> None:
+    connection.execute(
+        """
+        INSERT INTO human_reviews(
+            pr_id,
+            status,
+            reviewer,
+            comment,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            "accepted_for_backport",
+            "reviewer",
+            "Relevant",
+            "2024-01-01T00:20:00Z",
+        ),
+    )
