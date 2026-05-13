@@ -4,7 +4,7 @@
 
 ## Current Implementation Status
 
-The current implementation covers milestones 001 through 003:
+The current implementation covers milestones 001 through 005:
 
 - Python package metadata
 - `backport-harness` CLI entry point
@@ -15,9 +15,12 @@ The current implementation covers milestones 001 through 003:
 - GitHub token lookup from the configured environment variable
 - relative path normalization for configured workspace paths
 - forbidden private path prefix checks
+- slow, polite GitHub scanning for public upstream merged PRs
+- SQLite storage for PR metadata, changed files, scan audit rows, and analysis queue rows
+- saved PR listing with branch, queue status, date, limit, and ordering filters
 - focused CLI, storage, and config tests
 
-It does not yet implement GitHub scanning, saved-PR listing or inspection, Codex execution, worktrees, reports, retries, or human review commands.
+It does not yet implement saved-PR inspection, Codex execution, worktrees, reports, retries, or human review commands.
 
 ## Linux Setup
 
@@ -28,11 +31,69 @@ python3 -m venv .venv
 
 ## Usage
 
+All commands accept `--config config.yaml`; it defaults to `config.yaml`.
+
+### General
+
 ```sh
 .venv/bin/backport-harness --help
 .venv/bin/backport-harness version
 .venv/bin/backport-harness --config config.yaml version
+```
+
+- `--help` shows global options and available commands.
+- `version` prints the installed package version.
+
+### Database
+
+```sh
 .venv/bin/backport-harness --config config.yaml db init
+```
+
+- `db init` creates or migrates the configured SQLite database.
+- The default project config writes to `workspace/backport_harness.sqlite3`.
+- The command is idempotent and safe to run more than once.
+
+### Scan GitHub PRs
+
+```sh
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
+```
+
+- `scan` reads public upstream GitHub PRs merged in the requested `merged_at` date range.
+- If `--branch` is omitted, every branch listed in `github.branches` is scanned.
+- Saved PRs are upserted, changed files are refreshed, queue rows are created if missing, and scan runs are audited.
+- Scanning does not invoke Codex or create local worktrees.
+
+Optional GitHub authentication is read from the environment variable named by `github.token_env`, usually:
+
+```sh
+export GITHUB_TOKEN=...
+```
+
+### List Saved PRs
+
+```sh
+.venv/bin/backport-harness --config config.yaml list-prs
+.venv/bin/backport-harness --config config.yaml list-prs --branch master
+.venv/bin/backport-harness --config config.yaml list-prs --status QUEUED_FOR_ANALYSIS
+.venv/bin/backport-harness --config config.yaml list-prs --from-date 2024-01-01 --to-date 2024-01-31 --limit 50
+.venv/bin/backport-harness --config config.yaml list-prs --order-by priority
+```
+
+- `list-prs` reads only the local SQLite database.
+- It shows PR number, branch, merged date, queue status, priority, latest decision, and title.
+- Supported `--order-by` values are `merged-at`, `branch`, `priority`, and `status`.
+- It does not scan GitHub, invoke Codex, or modify queue state.
+
+### Current Workflow
+
+```sh
+.venv/bin/backport-harness --config config.yaml db init
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
+.venv/bin/backport-harness --config config.yaml list-prs --limit 20
 ```
 
 ## Linux Test Commands
@@ -40,4 +101,5 @@ python3 -m venv .venv
 ```sh
 .venv/bin/pytest
 .venv/bin/pytest tests/test_config.py tests/test_cli.py tests/test_storage.py
+.venv/bin/pytest tests/test_github_client.py tests/test_scan.py tests/test_cli.py
 ```
