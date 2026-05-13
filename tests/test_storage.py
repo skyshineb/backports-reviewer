@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backport_harness.storage import connect, init_database
+from backport_harness.storage import connect, init_database, list_saved_pull_requests
 
 
 REQUIRED_TABLES = {
@@ -64,3 +64,240 @@ def test_connect_enables_foreign_keys(tmp_path: Path) -> None:
         foreign_keys_enabled = connection.execute("PRAGMA foreign_keys").fetchone()[0]
 
     assert foreign_keys_enabled == 1
+
+
+def test_list_saved_pull_requests_returns_empty_list(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        rows = list_saved_pull_requests(connection)
+
+    assert rows == []
+
+
+def test_list_saved_pull_requests_filters_and_limits(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=1,
+            title="Master fix",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=100,
+        )
+        _insert_saved_pr(
+            connection,
+            number=2,
+            title="Release fix",
+            branch="0.15",
+            merged_at="2024-01-03T00:00:00Z",
+            status="DONE",
+            priority=10,
+        )
+        _insert_saved_pr(
+            connection,
+            number=3,
+            title="Later fix",
+            branch="master",
+            merged_at="2024-01-05T00:00:00Z",
+            status="DONE",
+            priority=50,
+        )
+
+        branch_rows = list_saved_pull_requests(connection, branch="master")
+        status_rows = list_saved_pull_requests(connection, status="DONE")
+        date_rows = list_saved_pull_requests(
+            connection,
+            from_date="2024-01-03",
+            to_date="2024-01-04",
+        )
+        limited_rows = list_saved_pull_requests(connection, limit=1)
+
+    assert [row.github_pr_number for row in branch_rows] == [1, 3]
+    assert [row.github_pr_number for row in status_rows] == [2, 3]
+    assert [row.github_pr_number for row in date_rows] == [2]
+    assert [row.github_pr_number for row in limited_rows] == [1]
+
+
+def test_list_saved_pull_requests_supports_ordering(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=1,
+            title="B branch",
+            branch="master",
+            merged_at="2024-01-03T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=100,
+        )
+        _insert_saved_pr(
+            connection,
+            number=2,
+            title="A branch",
+            branch="0.15",
+            merged_at="2024-01-02T00:00:00Z",
+            status="DONE",
+            priority=10,
+        )
+        _insert_saved_pr(
+            connection,
+            number=3,
+            title="C branch",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="FAILED_INFRA",
+            priority=50,
+        )
+
+        by_merged_at = list_saved_pull_requests(connection, order_by="merged-at")
+        by_branch = list_saved_pull_requests(connection, order_by="branch")
+        by_priority = list_saved_pull_requests(connection, order_by="priority")
+        by_status = list_saved_pull_requests(connection, order_by="status")
+
+    assert [row.github_pr_number for row in by_merged_at] == [3, 2, 1]
+    assert [row.github_pr_number for row in by_branch] == [2, 3, 1]
+    assert [row.github_pr_number for row in by_priority] == [2, 3, 1]
+    assert [row.github_pr_number for row in by_status] == [2, 3, 1]
+
+
+def test_list_saved_pull_requests_returns_latest_decision(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Decision fix",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="DONE",
+            priority=100,
+        )
+        first_run_id = _insert_analysis_run(connection, pr_id=pr_id, run_id="run-1")
+        second_run_id = _insert_analysis_run(connection, pr_id=pr_id, run_id="run-2")
+        _insert_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=first_run_id,
+            decision="INCONCLUSIVE",
+            created_at="2024-01-02T01:00:00Z",
+        )
+        _insert_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=second_run_id,
+            decision="MASTER_NOT_APPLICABLE",
+            created_at="2024-01-02T02:00:00Z",
+        )
+
+        rows = list_saved_pull_requests(connection)
+
+    assert rows[0].latest_decision == "MASTER_NOT_APPLICABLE"
+
+
+def _insert_saved_pr(
+    connection,
+    *,
+    number: int,
+    title: str,
+    branch: str,
+    merged_at: str,
+    status: str,
+    priority: int,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO prs(
+            github_pr_number,
+            github_pr_url,
+            title,
+            target_branch,
+            merged_at,
+            created_in_db_at,
+            updated_in_db_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            number,
+            f"https://github.com/apache/hudi/pull/{number}",
+            title,
+            branch,
+            merged_at,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        ),
+    )
+    pr_id = int(cursor.lastrowid)
+    connection.execute(
+        """
+        INSERT INTO analysis_queue(
+            pr_id,
+            status,
+            priority,
+            attempts,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            status,
+            priority,
+            0,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        ),
+    )
+    return pr_id
+
+
+def _insert_analysis_run(connection, *, pr_id: int, run_id: str) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO analysis_runs(
+            pr_id,
+            run_id,
+            started_at,
+            status,
+            task_dir
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (pr_id, run_id, "2024-01-01T00:00:00Z", "DONE", "workspace/tasks/pr-1"),
+    )
+    return int(cursor.lastrowid)
+
+
+def _insert_decision(
+    connection,
+    *,
+    pr_id: int,
+    analysis_run_id: int,
+    decision: str,
+    created_at: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO decisions(
+            pr_id,
+            analysis_run_id,
+            decision,
+            confidence,
+            reason,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (pr_id, analysis_run_id, decision, "medium", "reason", created_at),
+    )

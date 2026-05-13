@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from backport_harness import __version__
 from backport_harness.main import app
+from backport_harness.storage import connect, init_database
 
 
 runner = CliRunner()
@@ -49,6 +50,7 @@ def test_help_shows_commands() -> None:
 
     assert result.exit_code == 0
     assert "db" in result.output
+    assert "list-prs" in result.output
     assert "scan" in result.output
     assert "version" in result.output
 
@@ -179,3 +181,137 @@ def test_scan_command_reports_unconfigured_branch(
 
     assert result.exit_code != 0
     assert "not configured" in result.output
+
+
+def test_list_prs_reports_empty_database(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+
+    result = runner.invoke(app, ["--config", str(config_path), "list-prs"])
+
+    assert result.exit_code == 0
+    assert "No saved PRs found." in result.output
+
+
+def test_list_prs_displays_saved_prs(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path)
+
+    result = runner.invoke(app, ["--config", str(config_path), "list-prs"])
+
+    assert result.exit_code == 0
+    assert "#12345" in result.output
+    assert "master" in result.output
+    assert "QUEUED_FOR_ANALYSIS" in result.output
+    assert "Fix compaction bug" in result.output
+
+
+def test_list_prs_rejects_invalid_date(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "list-prs",
+            "--from-date",
+            "20240101",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "YYYY-MM-DD" in result.output
+
+
+def test_list_prs_rejects_invalid_order_by(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "list-prs",
+            "--order-by",
+            "title",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "order-by" in result.output
+
+
+def test_list_prs_rejects_invalid_limit(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "list-prs",
+            "--limit",
+            "0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "positive integer" in result.output
+
+
+def _insert_saved_pr(sqlite_path: Path) -> None:
+    with connect(sqlite_path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO prs(
+                github_pr_number,
+                github_pr_url,
+                title,
+                target_branch,
+                merged_at,
+                created_in_db_at,
+                updated_in_db_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                12345,
+                "https://github.com/apache/hudi/pull/12345",
+                "Fix compaction bug",
+                "master",
+                "2024-01-01T00:00:00Z",
+                "2024-01-01T00:00:00Z",
+                "2024-01-01T00:00:00Z",
+            ),
+        )
+        pr_id = int(cursor.lastrowid)
+        connection.execute(
+            """
+            INSERT INTO analysis_queue(
+                pr_id,
+                status,
+                priority,
+                attempts,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                pr_id,
+                "QUEUED_FOR_ANALYSIS",
+                100,
+                0,
+                "2024-01-01T00:00:00Z",
+                "2024-01-01T00:00:00Z",
+            ),
+        )
