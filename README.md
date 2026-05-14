@@ -4,7 +4,7 @@
 
 ## Current Implementation Status
 
-The current implementation covers milestones 001 through 005:
+The current implementation covers milestones 001 through 011:
 
 - Python package metadata
 - `backport-harness` CLI entry point
@@ -23,9 +23,10 @@ The current implementation covers milestones 001 through 005:
 - public upstream clone and OSS `0.15` worktree preparation
 - public Codex task bundle preparation for saved PRs
 - Codex prompt templates for analysis, test transplantation, and fix verification
+- one-PR Codex execution with log capture, timeout handling, and queue/run tracking
 - focused CLI, storage, and config tests
 
-It does not yet implement Codex execution, reports, retry commands, or human review commands.
+It does not yet implement Codex result validation, reports, retry commands, or human review commands.
 
 ## Linux Setup
 
@@ -108,11 +109,14 @@ export GITHUB_TOKEN=...
 ```sh
 .venv/bin/backport-harness --config config.yaml analyze --dry-run
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 10
+.venv/bin/backport-harness --config config.yaml analyze --pr 12345
 ```
 
 - `analyze --dry-run` selects queued PRs by priority and merge date.
 - It shows the PRs that would be analyzed later, without invoking Codex.
-- Running `analyze` without `--dry-run` currently fails because Codex execution is not implemented yet.
+- `analyze --pr` prepares the public task bundle, locks that PR in the queue, invokes Codex once, captures stdout/stderr under the task output logs, and records the run row.
+- Successful Codex exit leaves the queue item in `CODEX_RUNNING` until later result-validation milestones consume and store the generated result.
+- Non-zero exits and timeouts preserve the task directory and logs, then mark the queue retryable until the configured attempt limit is reached.
 
 ### Prepare Public OSS Worktree
 
@@ -149,6 +153,7 @@ export GITHUB_TOKEN=...
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
 .venv/bin/backport-harness --config config.yaml prepare --pr 12345
 .venv/bin/backport-harness --config config.yaml prepare-bundle --pr 12345
+.venv/bin/backport-harness --config config.yaml analyze --pr 12345
 ```
 
 ## Linux Test Commands
