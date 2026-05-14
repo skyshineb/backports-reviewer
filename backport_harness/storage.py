@@ -26,6 +26,107 @@ class SavedPullRequest:
     latest_decision: str | None
 
 
+@dataclass(frozen=True)
+class InspectedPullRequestFile:
+    filename: str
+    status: str | None
+    additions: int | None
+    deletions: int | None
+    is_test_file: bool
+    is_docs_file: bool
+    is_ci_file: bool
+
+
+@dataclass(frozen=True)
+class InspectedQueueState:
+    status: str
+    priority: int
+    attempts: int
+    next_retry_at: str | None
+    locked_at: str | None
+    locked_by: str | None
+    last_error: str | None
+
+
+@dataclass(frozen=True)
+class InspectedAnalysisRun:
+    id: int
+    run_id: str
+    started_at: str
+    finished_at: str | None
+    codex_exit_code: int | None
+    status: str
+    task_dir: str
+    result_json_path: str | None
+    notes_path: str | None
+    stdout_log_path: str | None
+    stderr_log_path: str | None
+
+
+@dataclass(frozen=True)
+class InspectedDecision:
+    decision: str
+    confidence: str
+    bugfix_classification: str | None
+    applies_to_oss_015: bool | None
+    reason: str
+    human_action: str | None
+    created_at: str
+    analysis_run: InspectedAnalysisRun
+
+
+@dataclass(frozen=True)
+class InspectedEvidence:
+    evidence_type: str
+    description: str
+    file_path: str | None
+    command: str | None
+    exit_code: int | None
+    log_path: str | None
+
+
+@dataclass(frozen=True)
+class InspectedTestRun:
+    phase: str
+    command: str | None
+    exit_code: int | None
+    result: str
+    log_path: str | None
+    started_at: str | None
+    finished_at: str | None
+
+
+@dataclass(frozen=True)
+class InspectedHumanReview:
+    status: str
+    reviewer: str | None
+    comment: str | None
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class InspectedPullRequest:
+    github_pr_number: int
+    github_pr_url: str
+    title: str
+    body: str | None
+    source_branch: str | None
+    target_branch: str
+    merged_commit_sha: str | None
+    created_at: str | None
+    updated_at: str | None
+    closed_at: str | None
+    merged_at: str
+    author: str | None
+    queue: InspectedQueueState | None
+    files: list[InspectedPullRequestFile]
+    latest_analysis_run: InspectedAnalysisRun | None
+    latest_decision: InspectedDecision | None
+    evidence: list[InspectedEvidence]
+    test_runs: list[InspectedTestRun]
+    human_review: InspectedHumanReview | None
+
+
 def connect(sqlite_path: Path) -> sqlite3.Connection:
     """Open a SQLite connection with project-required pragmas enabled."""
     connection = sqlite3.connect(sqlite_path)
@@ -313,6 +414,101 @@ def list_saved_pull_requests(
     ]
 
 
+def get_pull_request_inspection(
+    connection: sqlite3.Connection,
+    *,
+    pr_number: int,
+) -> InspectedPullRequest | None:
+    pr_row = connection.execute(
+        """
+        SELECT
+            prs.id,
+            prs.github_pr_number,
+            prs.github_pr_url,
+            prs.title,
+            prs.body,
+            prs.source_branch,
+            prs.target_branch,
+            prs.merged_commit_sha,
+            prs.created_at,
+            prs.updated_at,
+            prs.closed_at,
+            prs.merged_at,
+            prs.author,
+            analysis_queue.status,
+            analysis_queue.priority,
+            analysis_queue.attempts,
+            analysis_queue.next_retry_at,
+            analysis_queue.locked_at,
+            analysis_queue.locked_by,
+            analysis_queue.last_error
+        FROM prs
+        LEFT JOIN analysis_queue ON analysis_queue.pr_id = prs.id
+        WHERE prs.github_pr_number = ?
+        ORDER BY prs.target_branch ASC
+        LIMIT 1
+        """,
+        (pr_number,),
+    ).fetchone()
+
+    if pr_row is None:
+        return None
+
+    pr_id = int(pr_row[0])
+    queue = None
+    if pr_row[13] is not None:
+        queue = InspectedQueueState(
+            status=str(pr_row[13]),
+            priority=int(pr_row[14]),
+            attempts=int(pr_row[15]),
+            next_retry_at=pr_row[16],
+            locked_at=pr_row[17],
+            locked_by=pr_row[18],
+            last_error=pr_row[19],
+        )
+
+    files = _get_inspected_files(connection, pr_id)
+    latest_analysis_run = _get_latest_inspected_analysis_run(connection, pr_id)
+    latest_decision = _get_latest_inspected_decision(connection, pr_id)
+    evidence: list[InspectedEvidence] = []
+    test_runs: list[InspectedTestRun] = []
+
+    if latest_decision is not None:
+        evidence = _get_inspected_evidence(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=latest_decision.analysis_run_id,
+        )
+
+    if latest_analysis_run is not None:
+        test_runs = _get_inspected_test_runs(
+            connection,
+            analysis_run_id=latest_analysis_run.id,
+        )
+
+    return InspectedPullRequest(
+        github_pr_number=int(pr_row[1]),
+        github_pr_url=str(pr_row[2]),
+        title=str(pr_row[3]),
+        body=pr_row[4],
+        source_branch=pr_row[5],
+        target_branch=str(pr_row[6]),
+        merged_commit_sha=pr_row[7],
+        created_at=pr_row[8],
+        updated_at=pr_row[9],
+        closed_at=pr_row[10],
+        merged_at=str(pr_row[11]),
+        author=pr_row[12],
+        queue=queue,
+        files=files,
+        latest_analysis_run=latest_analysis_run,
+        latest_decision=latest_decision.decision if latest_decision else None,
+        evidence=evidence,
+        test_runs=test_runs,
+        human_review=_get_latest_human_review(connection, pr_id),
+    )
+
+
 def is_test_file(filename: str) -> bool:
     normalized = filename.lower()
     name = Path(normalized).name
@@ -379,3 +575,254 @@ def _load_migrations() -> list[tuple[str, str]]:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class _LatestDecisionWithRunId:
+    analysis_run_id: int
+    decision: InspectedDecision
+
+
+def _get_inspected_files(
+    connection: sqlite3.Connection,
+    pr_id: int,
+) -> list[InspectedPullRequestFile]:
+    rows = connection.execute(
+        """
+        SELECT
+            filename,
+            status,
+            additions,
+            deletions,
+            is_test_file,
+            is_docs_file,
+            is_ci_file
+        FROM pr_files
+        WHERE pr_id = ?
+        ORDER BY filename ASC
+        """,
+        (pr_id,),
+    ).fetchall()
+
+    return [
+        InspectedPullRequestFile(
+            filename=str(row[0]),
+            status=row[1],
+            additions=row[2],
+            deletions=row[3],
+            is_test_file=bool(row[4]),
+            is_docs_file=bool(row[5]),
+            is_ci_file=bool(row[6]),
+        )
+        for row in rows
+    ]
+
+
+def _get_latest_inspected_decision(
+    connection: sqlite3.Connection,
+    pr_id: int,
+) -> _LatestDecisionWithRunId | None:
+    row = connection.execute(
+        """
+        SELECT
+            decisions.analysis_run_id,
+            decisions.decision,
+            decisions.confidence,
+            decisions.bugfix_classification,
+            decisions.applies_to_oss_015,
+            decisions.reason,
+            decisions.human_action,
+            decisions.created_at,
+            analysis_runs.run_id,
+            analysis_runs.started_at,
+            analysis_runs.finished_at,
+            analysis_runs.codex_exit_code,
+            analysis_runs.status,
+            analysis_runs.task_dir,
+            analysis_runs.result_json_path,
+            analysis_runs.notes_path,
+            analysis_runs.stdout_log_path,
+            analysis_runs.stderr_log_path
+        FROM decisions
+        JOIN analysis_runs ON analysis_runs.id = decisions.analysis_run_id
+        WHERE decisions.pr_id = ?
+        ORDER BY decisions.created_at DESC, decisions.id DESC
+        LIMIT 1
+        """,
+        (pr_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    applies_to_oss_015 = None
+    if row[4] is not None:
+        applies_to_oss_015 = bool(row[4])
+
+    return _LatestDecisionWithRunId(
+        analysis_run_id=int(row[0]),
+        decision=InspectedDecision(
+            decision=str(row[1]),
+            confidence=str(row[2]),
+            bugfix_classification=row[3],
+            applies_to_oss_015=applies_to_oss_015,
+            reason=str(row[5]),
+            human_action=row[6],
+            created_at=str(row[7]),
+            analysis_run=InspectedAnalysisRun(
+                id=int(row[0]),
+                run_id=str(row[8]),
+                started_at=str(row[9]),
+                finished_at=row[10],
+                codex_exit_code=row[11],
+                status=str(row[12]),
+                task_dir=str(row[13]),
+                result_json_path=row[14],
+                notes_path=row[15],
+                stdout_log_path=row[16],
+                stderr_log_path=row[17],
+            ),
+        ),
+    )
+
+
+def _get_latest_inspected_analysis_run(
+    connection: sqlite3.Connection,
+    pr_id: int,
+) -> InspectedAnalysisRun | None:
+    row = connection.execute(
+        """
+        SELECT
+            id,
+            run_id,
+            started_at,
+            finished_at,
+            codex_exit_code,
+            status,
+            task_dir,
+            result_json_path,
+            notes_path,
+            stdout_log_path,
+            stderr_log_path
+        FROM analysis_runs
+        WHERE pr_id = ?
+        ORDER BY started_at DESC, id DESC
+        LIMIT 1
+        """,
+        (pr_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return InspectedAnalysisRun(
+        id=int(row[0]),
+        run_id=str(row[1]),
+        started_at=str(row[2]),
+        finished_at=row[3],
+        codex_exit_code=row[4],
+        status=str(row[5]),
+        task_dir=str(row[6]),
+        result_json_path=row[7],
+        notes_path=row[8],
+        stdout_log_path=row[9],
+        stderr_log_path=row[10],
+    )
+
+
+def _get_inspected_evidence(
+    connection: sqlite3.Connection,
+    *,
+    pr_id: int,
+    analysis_run_id: int,
+) -> list[InspectedEvidence]:
+    rows = connection.execute(
+        """
+        SELECT
+            evidence.evidence_type,
+            evidence.description,
+            evidence.file_path,
+            evidence.command,
+            evidence.exit_code,
+            evidence.log_path
+        FROM evidence
+        JOIN decisions ON decisions.id = evidence.decision_id
+        WHERE decisions.pr_id = ? AND decisions.analysis_run_id = ?
+        ORDER BY evidence.id ASC
+        """,
+        (pr_id, analysis_run_id),
+    ).fetchall()
+
+    return [
+        InspectedEvidence(
+            evidence_type=str(row[0]),
+            description=str(row[1]),
+            file_path=row[2],
+            command=row[3],
+            exit_code=row[4],
+            log_path=row[5],
+        )
+        for row in rows
+    ]
+
+
+def _get_inspected_test_runs(
+    connection: sqlite3.Connection,
+    *,
+    analysis_run_id: int,
+) -> list[InspectedTestRun]:
+    rows = connection.execute(
+        """
+        SELECT
+            phase,
+            command,
+            exit_code,
+            result,
+            log_path,
+            started_at,
+            finished_at
+        FROM test_runs
+        WHERE analysis_run_id = ?
+        ORDER BY id ASC
+        """,
+        (analysis_run_id,),
+    ).fetchall()
+
+    return [
+        InspectedTestRun(
+            phase=str(row[0]),
+            command=row[1],
+            exit_code=row[2],
+            result=str(row[3]),
+            log_path=row[4],
+            started_at=row[5],
+            finished_at=row[6],
+        )
+        for row in rows
+    ]
+
+
+def _get_latest_human_review(
+    connection: sqlite3.Connection,
+    pr_id: int,
+) -> InspectedHumanReview | None:
+    row = connection.execute(
+        """
+        SELECT status, reviewer, comment, updated_at
+        FROM human_reviews
+        WHERE pr_id = ?
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        (pr_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return InspectedHumanReview(
+        status=str(row[0]),
+        reviewer=row[1],
+        comment=row[2],
+        updated_at=str(row[3]),
+    )

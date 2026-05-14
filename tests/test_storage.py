@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from backport_harness.storage import connect, init_database, list_saved_pull_requests
+from backport_harness.storage import (
+    connect,
+    get_pull_request_inspection,
+    init_database,
+    list_saved_pull_requests,
+)
 
 
 REQUIRED_TABLES = {
@@ -204,6 +209,162 @@ def test_list_saved_pull_requests_returns_latest_decision(tmp_path: Path) -> Non
     assert rows[0].latest_decision == "MASTER_NOT_APPLICABLE"
 
 
+def test_get_pull_request_inspection_returns_none_for_missing_pr(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        inspection = get_pull_request_inspection(connection, pr_number=12345)
+
+    assert inspection is None
+
+
+def test_get_pull_request_inspection_returns_pre_analysis_pr(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Inspect me",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=100,
+        )
+        _insert_pr_file(
+            connection,
+            pr_id=pr_id,
+            filename="src/test/TestHoodie.java",
+            is_test_file=True,
+        )
+
+        inspection = get_pull_request_inspection(connection, pr_number=12345)
+
+    assert inspection is not None
+    assert inspection.github_pr_number == 12345
+    assert inspection.title == "Inspect me"
+    assert inspection.queue is not None
+    assert inspection.queue.status == "QUEUED_FOR_ANALYSIS"
+    assert inspection.files[0].filename == "src/test/TestHoodie.java"
+    assert inspection.files[0].is_test_file is True
+    assert inspection.latest_analysis_run is None
+    assert inspection.latest_decision is None
+    assert inspection.evidence == []
+    assert inspection.test_runs == []
+    assert inspection.human_review is None
+
+
+def test_get_pull_request_inspection_returns_post_analysis_details(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyzed PR",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="DONE",
+            priority=50,
+        )
+        _insert_pr_file(
+            connection,
+            pr_id=pr_id,
+            filename="src/main/Hoodie.java",
+            is_test_file=False,
+        )
+        first_run_id = _insert_analysis_run(connection, pr_id=pr_id, run_id="run-1")
+        second_run_id = _insert_analysis_run(
+            connection,
+            pr_id=pr_id,
+            run_id="run-2",
+            stdout_log_path="workspace/tasks/pr-12345/output/stdout.log",
+        )
+        _insert_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=first_run_id,
+            decision="INCONCLUSIVE",
+            created_at="2024-01-02T01:00:00Z",
+        )
+        latest_decision_id = _insert_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=second_run_id,
+            decision="MASTER_NOT_APPLICABLE",
+            created_at="2024-01-02T02:00:00Z",
+        )
+        _insert_evidence(connection, decision_id=latest_decision_id)
+        _insert_test_run(connection, analysis_run_id=second_run_id)
+        _insert_human_review(connection, pr_id=pr_id, status="accepted_for_backport")
+
+        inspection = get_pull_request_inspection(connection, pr_number=12345)
+
+    assert inspection is not None
+    assert inspection.latest_decision is not None
+    assert inspection.latest_decision.decision == "MASTER_NOT_APPLICABLE"
+    assert inspection.latest_analysis_run is not None
+    assert inspection.latest_analysis_run.run_id == "run-2"
+    assert inspection.latest_decision.analysis_run.run_id == "run-2"
+    assert (
+        inspection.latest_decision.analysis_run.stdout_log_path
+        == "workspace/tasks/pr-12345/output/stdout.log"
+    )
+    assert len(inspection.evidence) == 1
+    assert inspection.evidence[0].evidence_type == "file"
+    assert len(inspection.test_runs) == 1
+    assert inspection.test_runs[0].result == "passed"
+    assert inspection.human_review is not None
+    assert inspection.human_review.status == "accepted_for_backport"
+
+
+def test_get_pull_request_inspection_returns_failed_run_without_decision(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Failed run PR",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="FAILED_INFRA",
+            priority=50,
+        )
+        failed_run_id = _insert_analysis_run(
+            connection,
+            pr_id=pr_id,
+            run_id="failed-run",
+            stdout_log_path="workspace/tasks/pr-12345/output/failed-stdout.log",
+        )
+        _insert_test_run(connection, analysis_run_id=failed_run_id)
+
+        inspection = get_pull_request_inspection(connection, pr_number=12345)
+
+    assert inspection is not None
+    assert inspection.latest_decision is None
+    assert inspection.latest_analysis_run is not None
+    assert inspection.latest_analysis_run.run_id == "failed-run"
+    assert (
+        inspection.latest_analysis_run.stdout_log_path
+        == "workspace/tasks/pr-12345/output/failed-stdout.log"
+    )
+    assert len(inspection.test_runs) == 1
+    assert inspection.test_runs[0].result == "passed"
+
+
 def _insert_saved_pr(
     connection,
     *,
@@ -262,19 +423,77 @@ def _insert_saved_pr(
     return pr_id
 
 
-def _insert_analysis_run(connection, *, pr_id: int, run_id: str) -> int:
+def _insert_pr_file(
+    connection,
+    *,
+    pr_id: int,
+    filename: str,
+    is_test_file: bool,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO pr_files(
+            pr_id,
+            filename,
+            status,
+            additions,
+            deletions,
+            is_test_file,
+            is_docs_file,
+            is_ci_file
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            filename,
+            "modified",
+            10,
+            2,
+            int(is_test_file),
+            0,
+            0,
+        ),
+    )
+
+
+def _insert_analysis_run(
+    connection,
+    *,
+    pr_id: int,
+    run_id: str,
+    stdout_log_path: str | None = None,
+) -> int:
     cursor = connection.execute(
         """
         INSERT INTO analysis_runs(
             pr_id,
             run_id,
             started_at,
+            finished_at,
+            codex_exit_code,
             status,
-            task_dir
+            task_dir,
+            result_json_path,
+            notes_path,
+            stdout_log_path,
+            stderr_log_path
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (pr_id, run_id, "2024-01-01T00:00:00Z", "DONE", "workspace/tasks/pr-1"),
+        (
+            pr_id,
+            run_id,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:10:00Z",
+            0,
+            "DONE",
+            "workspace/tasks/pr-1",
+            "workspace/tasks/pr-1/output/codex_result.json",
+            "workspace/tasks/pr-1/output/notes.md",
+            stdout_log_path,
+            "workspace/tasks/pr-1/output/stderr.log",
+        ),
     )
     return int(cursor.lastrowid)
 
@@ -286,8 +505,8 @@ def _insert_decision(
     analysis_run_id: int,
     decision: str,
     created_at: str,
-) -> None:
-    connection.execute(
+) -> int:
+    cursor = connection.execute(
         """
         INSERT INTO decisions(
             pr_id,
@@ -300,4 +519,81 @@ def _insert_decision(
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (pr_id, analysis_run_id, decision, "medium", "reason", created_at),
+    )
+    return int(cursor.lastrowid)
+
+
+def _insert_evidence(connection, *, decision_id: int) -> None:
+    connection.execute(
+        """
+        INSERT INTO evidence(
+            decision_id,
+            evidence_type,
+            description,
+            file_path,
+            command,
+            exit_code,
+            log_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            decision_id,
+            "file",
+            "Affected file is absent on 0.15",
+            "src/main/Hoodie.java",
+            "grep Hoodie",
+            1,
+            "workspace/tasks/pr-12345/output/logs/evidence.log",
+        ),
+    )
+
+
+def _insert_test_run(connection, *, analysis_run_id: int) -> None:
+    connection.execute(
+        """
+        INSERT INTO test_runs(
+            analysis_run_id,
+            phase,
+            command,
+            exit_code,
+            result,
+            log_path,
+            started_at,
+            finished_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            analysis_run_id,
+            "after_fix",
+            "mvn test",
+            0,
+            "passed",
+            "workspace/tasks/pr-12345/output/logs/test.log",
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:02:00Z",
+        ),
+    )
+
+
+def _insert_human_review(connection, *, pr_id: int, status: str) -> None:
+    connection.execute(
+        """
+        INSERT INTO human_reviews(
+            pr_id,
+            status,
+            reviewer,
+            comment,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            status,
+            "reviewer",
+            "Looks relevant",
+            "2024-01-01T00:00:00Z",
+        ),
     )
