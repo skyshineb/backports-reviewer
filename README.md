@@ -21,9 +21,10 @@ The current implementation covers milestones 001 through 005:
 - detailed saved PR inspection with changed files, queue state, decisions, evidence, logs, tests, and review status
 - dry-run analysis candidate selection by queue priority
 - public upstream clone and OSS `0.15` worktree preparation
+- public Codex task bundle preparation for saved PRs
 - focused CLI, storage, and config tests
 
-It does not yet implement Codex execution, task bundles, reports, retry commands, or human review commands.
+It does not yet implement Codex execution, reports, retry commands, or human review commands.
 
 ## Linux Setup
 
@@ -124,6 +125,18 @@ export GITHUB_TOKEN=...
 - It rejects configured private path overlaps and remote URL mismatches.
 - It does not invoke Codex, create task bundles, or modify SQLite.
 
+### Prepare Public Codex Task Bundle
+
+```sh
+.venv/bin/backport-harness --config config.yaml prepare-bundle --pr 12345
+```
+
+- `prepare-bundle` creates `workspace/tasks/pr-12345/` for a saved PR.
+- It writes `pr.json`, `files_changed.json`, `pr.diff`, and `instructions.md`.
+- It pre-creates `output/`, `output/logs/`, and `output/patches/`.
+- It prepares a public OSS `0.15` worktree and references that path in the instructions.
+- It does not invoke Codex or modify queue state.
+
 ### Current Workflow
 
 ```sh
@@ -133,6 +146,7 @@ export GITHUB_TOKEN=...
 .venv/bin/backport-harness --config config.yaml inspect --pr 12345
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
 .venv/bin/backport-harness --config config.yaml prepare --pr 12345
+.venv/bin/backport-harness --config config.yaml prepare-bundle --pr 12345
 ```
 
 ## Linux Test Commands
