@@ -16,6 +16,21 @@ Create prompt templates that define Codex analysis responsibilities, allowed dec
 - Require the master PR analysis prompt to follow an ordered investigation sequence before deciding applicability.
 - Repeat the private-repo security boundary in every prompt.
 
+### PR 11 Comments 3, 5, and 6 Follow-up Scope
+
+- Add a narrow `FAILED_INFRA` policy to all four prompt templates.
+- Restrict `FAILED_INFRA` to command timeout, dependency resolution failure, filesystem error, unavailable test infrastructure, or unreadable required input files.
+- Require logical uncertainty to use `INCONCLUSIVE`, not `FAILED_INFRA`.
+- Add phase-specific allowed decision lists to the test transplantation and fix verification prompts.
+- Limit test transplantation and fix verification decision-specific requirements to decisions allowed in those phases.
+- Preserve and verify the existing confidence enum, with these exact mappings:
+  - `very_high`: test fails before fix and passes after adapted fix.
+  - `high`: regression test reproduces the bug on OSS 0.15.
+  - `medium`: relevant code/logic exists but no test proof.
+  - `low`: weak relevance signals only.
+  - `unknown`: inconclusive.
+- Do not address PR comments 7-10 or the FYI note in this task.
+
 ## Expected Behavior
 
 - Prompts forbid private fork access.
@@ -43,6 +58,9 @@ Create prompt templates that define Codex analysis responsibilities, allowed dec
 - Verify analysis prompts list all allowed decision values.
 - Verify uncertain cases are directed to `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`.
 - Verify task builder selects the branch-specific analysis prompt.
+- Verify exact allowed decision lists for all four prompt templates.
+- Verify the narrow `FAILED_INFRA` policy text appears in every prompt.
+- Verify exact confidence enum mappings appear in every prompt.
 
 ## Assumptions and Explicit Non-goals
 

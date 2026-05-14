@@ -29,6 +29,18 @@ Do not silently discard uncertain cases.
 - `INCONCLUSIVE`
 - `FAILED_INFRA`
 
+## FAILED_INFRA Policy
+
+Use `FAILED_INFRA` only for one of these infrastructure failures:
+
+- command timeout
+- dependency resolution failure
+- filesystem error
+- unavailable test infrastructure
+- unreadable required input files
+
+Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptation, or inability to reason from public code must use `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`, not `FAILED_INFRA`.
+
 ## Strict JSON Output
 
 Write strict JSON only to `output/codex_result.json`.
@@ -52,11 +64,11 @@ The JSON object must include these top-level fields:
 
 `confidence` must be one of:
 
-- `very_high`: a focused public test fails before the adapted fix and passes after it.
-- `high`: a focused public test reproduces the bug on OSS 0.15.
-- `medium`: affected public code or equivalent logic exists but there is no test proof.
-- `low`: only weak public relevance signals exist.
-- `unknown`: the result is inconclusive.
+- `very_high`: test fails before fix and passes after adapted fix.
+- `high`: regression test reproduces the bug on OSS 0.15.
+- `medium`: relevant code/logic exists but no test proof.
+- `low`: weak relevance signals only.
+- `unknown`: inconclusive.
 
 `applicability` must be an object with:
 

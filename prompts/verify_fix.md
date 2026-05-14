@@ -12,10 +12,31 @@ Adapt the public upstream fix to the public OSS 0.15 worktree only when the bug 
 Run the focused public test again when available.
 Save any adapted patch under `output/patches/` and logs under `output/logs/`.
 
+## Allowed Decisions
+
+- `MASTER_FIX_VERIFIED_ON_015`
+- `MASTER_REPRODUCED_ON_015`
+- `INCONCLUSIVE`
+- `NEEDS_HUMAN_REVIEW`
+- `FAILED_INFRA`
+
+## FAILED_INFRA Policy
+
+Use `FAILED_INFRA` only for one of these infrastructure failures:
+
+- command timeout
+- dependency resolution failure
+- filesystem error
+- unavailable test infrastructure
+- unreadable required input files
+
+Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptation, or inability to reason from public code must use `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`, not `FAILED_INFRA`.
+
 ## Strict JSON Output
 
 Write strict JSON only to `output/codex_result.json`.
 Use `schema_version: 1`.
+Use only the allowed decision values listed above.
 
 The JSON object must include these top-level fields:
 
@@ -34,11 +55,11 @@ The JSON object must include these top-level fields:
 
 `confidence` must be one of:
 
-- `very_high`: a focused public test fails before the adapted fix and passes after it.
-- `high`: a focused public test reproduces the bug on OSS 0.15.
-- `medium`: affected public code or equivalent logic exists but there is no test proof.
-- `low`: only weak public relevance signals exist.
-- `unknown`: the result is inconclusive.
+- `very_high`: test fails before fix and passes after adapted fix.
+- `high`: regression test reproduces the bug on OSS 0.15.
+- `medium`: relevant code/logic exists but no test proof.
+- `low`: weak relevance signals only.
+- `unknown`: inconclusive.
 
 `applicability` must be an object with:
 
@@ -81,13 +102,9 @@ Use null only for fields that are explicitly unavailable because a test, transpl
 
 Decision-specific requirements:
 
-- `DIRECT_015_BUGFIX`: require `applicability.applies_to_oss_015: true` and `classification`, `code_presence`, or `logic_match` evidence showing this is a public OSS 0.15 bugfix candidate.
 - `MASTER_FIX_VERIFIED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, at least one `test_failure` evidence item, and at least one `test_pass` evidence item.
 - `MASTER_REPRODUCED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
-- `MASTER_POSSIBLY_APPLICABLE`: require `applicability.applies_to_oss_015: true` or null with a reason, plus `code_presence` or `logic_match` evidence.
-- `MASTER_NOT_APPLICABLE`: require `applicability.applies_to_oss_015: false` and `non_applicability` evidence for absent file, class, module, feature, or bug introduction after 0.15.
-- `DISCARDED_NON_BUGFIX`, `DISCARDED_DOCS_ONLY`, `DISCARDED_CI_ONLY`, and `DISCARDED_RELEASE_ONLY`: require `classification` evidence.
 - `INCONCLUSIVE` and `NEEDS_HUMAN_REVIEW`: require `uncertainty` evidence and a clear `applicability.reason`.
-- `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or input file that explains the tooling or environment failure.
+- `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or required input file that identifies one of the failures allowed by the `FAILED_INFRA` policy.
 
 Do not silently discard uncertain cases.

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -28,6 +29,22 @@ CONFIDENCE_VALUES = [
     "medium",
     "low",
     "unknown",
+]
+CONFIDENCE_MAPPINGS = [
+    "`very_high`: test fails before fix and passes after adapted fix.",
+    "`high`: regression test reproduces the bug on OSS 0.15.",
+    "`medium`: relevant code/logic exists but no test proof.",
+    "`low`: weak relevance signals only.",
+    "`unknown`: inconclusive.",
+]
+FAILED_INFRA_POLICY_SNIPPETS = [
+    "Use `FAILED_INFRA` only for one of these infrastructure failures:",
+    "- command timeout",
+    "- dependency resolution failure",
+    "- filesystem error",
+    "- unavailable test infrastructure",
+    "- unreadable required input files",
+    "Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptation, or inability to reason from public code must use `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`, not `FAILED_INFRA`.",
 ]
 EVIDENCE_FIELDS = [
     "type",
@@ -88,7 +105,27 @@ ANALYZE_MASTER_DECISIONS = [
     "DISCARDED_RELEASE_ONLY",
     "FAILED_INFRA",
 ]
-DECISION_SPECIFIC_REQUIREMENTS = [
+TRANSPLANT_DECISIONS = [
+    "MASTER_REPRODUCED_ON_015",
+    "MASTER_POSSIBLY_APPLICABLE",
+    "INCONCLUSIVE",
+    "NEEDS_HUMAN_REVIEW",
+    "FAILED_INFRA",
+]
+VERIFY_DECISIONS = [
+    "MASTER_FIX_VERIFIED_ON_015",
+    "MASTER_REPRODUCED_ON_015",
+    "INCONCLUSIVE",
+    "NEEDS_HUMAN_REVIEW",
+    "FAILED_INFRA",
+]
+DECISIONS_BY_PROMPT = {
+    "analyze_015_pr.md": ANALYZE_015_DECISIONS,
+    "analyze_master_pr.md": ANALYZE_MASTER_DECISIONS,
+    "transplant_test.md": TRANSPLANT_DECISIONS,
+    "verify_fix.md": VERIFY_DECISIONS,
+}
+ANALYSIS_DECISION_SPECIFIC_REQUIREMENTS = [
     "DIRECT_015_BUGFIX",
     "MASTER_FIX_VERIFIED_ON_015",
     "MASTER_REPRODUCED_ON_015",
@@ -108,6 +145,28 @@ DECISION_SPECIFIC_REQUIREMENTS = [
     "`test_failure` evidence item",
     "`test_pass` evidence item",
 ]
+TRANSPLANT_DECISION_SPECIFIC_REQUIREMENTS = [
+    "MASTER_REPRODUCED_ON_015",
+    "MASTER_POSSIBLY_APPLICABLE",
+    "INCONCLUSIVE",
+    "NEEDS_HUMAN_REVIEW",
+    "FAILED_INFRA",
+    "code_presence` or `logic_match` evidence",
+    "uncertainty` evidence",
+    "infra_failure` evidence",
+    "`test_failure` evidence",
+]
+VERIFY_DECISION_SPECIFIC_REQUIREMENTS = [
+    "MASTER_FIX_VERIFIED_ON_015",
+    "MASTER_REPRODUCED_ON_015",
+    "INCONCLUSIVE",
+    "NEEDS_HUMAN_REVIEW",
+    "FAILED_INFRA",
+    "uncertainty` evidence",
+    "infra_failure` evidence",
+    "`test_failure` evidence item",
+    "`test_pass` evidence item",
+]
 MASTER_INVESTIGATION_SEQUENCE = [
     "1. Read `pr.json` for PR metadata.",
     "2. Inspect `files_changed.json` and `pr.diff`.",
@@ -121,6 +180,21 @@ MASTER_INVESTIGATION_SEQUENCE = [
     "10. If reproduction succeeds, optionally apply or adapt the public fix and verify with the focused test.",
     "11. Write strict JSON to `output/codex_result.json`.",
 ]
+
+
+def _section(content: str, heading: str) -> str:
+    match = re.search(
+        rf"^## {re.escape(heading)}\n(?P<body>.*?)(?=^## |\Z)",
+        content,
+        re.M | re.S,
+    )
+    assert match is not None
+    return match.group("body")
+
+
+def _allowed_decisions(content: str) -> list[str]:
+    section = _section(content, "Allowed Decisions")
+    return re.findall(r"^- `([^`]+)`$", section, re.M)
 
 
 def test_prompt_files_exist() -> None:
@@ -153,6 +227,9 @@ def test_prompts_define_structured_json_contract() -> None:
         for confidence_value in CONFIDENCE_VALUES:
             assert confidence_value in content
 
+        for confidence_mapping in CONFIDENCE_MAPPINGS:
+            assert confidence_mapping in content
+
         for evidence_field in EVIDENCE_FIELDS:
             assert f"`{evidence_field}`" in content
 
@@ -160,26 +237,63 @@ def test_prompts_define_structured_json_contract() -> None:
             assert evidence_type in content
 
 
-def test_prompts_define_decision_specific_evidence_requirements() -> None:
+def test_prompts_define_narrow_failed_infra_policy() -> None:
     for prompt_file in PROMPT_FILES:
         content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
 
+        assert "## FAILED_INFRA Policy" in content
+        for snippet in FAILED_INFRA_POLICY_SNIPPETS:
+            assert snippet in content
+
+
+def test_prompts_define_decision_specific_evidence_requirements() -> None:
+    for prompt_file in ("analyze_015_pr.md", "analyze_master_pr.md"):
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
         assert "Decision-specific requirements:" in content
-        for requirement in DECISION_SPECIFIC_REQUIREMENTS:
+        for requirement in ANALYSIS_DECISION_SPECIFIC_REQUIREMENTS:
             assert requirement in content
 
 
-def test_analysis_prompts_list_allowed_decisions() -> None:
-    analyze_015 = (PROMPTS_DIR / "analyze_015_pr.md").read_text(encoding="utf-8")
-    analyze_master = (PROMPTS_DIR / "analyze_master_pr.md").read_text(
-        encoding="utf-8"
-    )
+def test_transplant_and_verify_decision_requirements_are_phase_specific() -> None:
+    transplant = (PROMPTS_DIR / "transplant_test.md").read_text(encoding="utf-8")
+    verify = (PROMPTS_DIR / "verify_fix.md").read_text(encoding="utf-8")
 
-    for decision in ANALYZE_015_DECISIONS:
-        assert decision in analyze_015
+    assert "Decision-specific requirements:" in transplant
+    for requirement in TRANSPLANT_DECISION_SPECIFIC_REQUIREMENTS:
+        assert requirement in transplant
+    for disallowed_decision in (
+        "DIRECT_015_BUGFIX",
+        "MASTER_FIX_VERIFIED_ON_015",
+        "MASTER_NOT_APPLICABLE",
+        "DISCARDED_NON_BUGFIX",
+        "DISCARDED_DOCS_ONLY",
+        "DISCARDED_CI_ONLY",
+        "DISCARDED_RELEASE_ONLY",
+    ):
+        assert disallowed_decision not in _section(
+            transplant, "Strict JSON Output"
+        )
 
-    for decision in ANALYZE_MASTER_DECISIONS:
-        assert decision in analyze_master
+    assert "Decision-specific requirements:" in verify
+    for requirement in VERIFY_DECISION_SPECIFIC_REQUIREMENTS:
+        assert requirement in verify
+    for disallowed_decision in (
+        "DIRECT_015_BUGFIX",
+        "MASTER_POSSIBLY_APPLICABLE",
+        "MASTER_NOT_APPLICABLE",
+        "DISCARDED_NON_BUGFIX",
+        "DISCARDED_DOCS_ONLY",
+        "DISCARDED_CI_ONLY",
+        "DISCARDED_RELEASE_ONLY",
+    ):
+        assert disallowed_decision not in _section(verify, "Strict JSON Output")
+
+
+def test_prompts_list_exact_allowed_decisions() -> None:
+    for prompt_file, expected_decisions in DECISIONS_BY_PROMPT.items():
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+        assert _allowed_decisions(content) == expected_decisions
 
 
 def test_master_prompt_defines_required_investigation_sequence_in_order() -> None:
