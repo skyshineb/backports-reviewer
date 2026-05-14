@@ -7,11 +7,15 @@ from importlib import resources
 from pathlib import Path
 
 from backport_harness.github_client import GitHubChangedFile, GitHubPullRequest
+from backport_harness.state_machine import (
+    QUEUE_STATUS_QUEUED,
+    RETRYABLE_QUEUE_STATUSES,
+    assign_initial_priority,
+)
 
 
 MIGRATIONS_PACKAGE = "backport_harness.migrations"
 MIGRATION_SUFFIX = ".sql"
-QUEUE_STATUS_QUEUED = "QUEUED_FOR_ANALYSIS"
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,19 @@ class SavedPullRequest:
     merged_at: str
     queue_status: str
     priority: int
+    latest_decision: str | None
+
+
+@dataclass(frozen=True)
+class AnalysisCandidate:
+    github_pr_number: int
+    github_pr_url: str
+    title: str
+    target_branch: str
+    merged_at: str
+    queue_status: str
+    priority: int
+    attempts: int
     latest_decision: str | None
 
 
@@ -301,8 +318,12 @@ def replace_pull_request_files(
 def create_analysis_queue_row_if_missing(
     connection: sqlite3.Connection,
     pr_id: int,
+    *,
+    target_branch: str,
+    title: str,
 ) -> None:
     now = _utc_now()
+    priority = assign_initial_priority(target_branch=target_branch, title=title)
     connection.execute(
         """
         INSERT OR IGNORE INTO analysis_queue(
@@ -315,8 +336,71 @@ def create_analysis_queue_row_if_missing(
         )
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (pr_id, QUEUE_STATUS_QUEUED, 100, 0, now, now),
+        (pr_id, QUEUE_STATUS_QUEUED, priority, 0, now, now),
     )
+
+
+def select_analysis_candidates(
+    connection: sqlite3.Connection,
+    *,
+    limit: int,
+) -> list[AnalysisCandidate]:
+    retryable_statuses = sorted(RETRYABLE_QUEUE_STATUSES)
+    placeholders = ", ".join("?" for _ in retryable_statuses)
+    parameters: list[object] = [*retryable_statuses, limit]
+
+    cursor = connection.execute(
+        f"""
+        WITH latest_decisions AS (
+            SELECT ranked.pr_id, ranked.decision
+            FROM (
+                SELECT
+                    decisions.pr_id,
+                    decisions.decision,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY decisions.pr_id
+                        ORDER BY decisions.created_at DESC, decisions.id DESC
+                    ) AS row_number
+                FROM decisions
+            ) AS ranked
+            WHERE ranked.row_number = 1
+        )
+        SELECT
+            prs.github_pr_number,
+            prs.github_pr_url,
+            prs.title,
+            prs.target_branch,
+            prs.merged_at,
+            analysis_queue.status,
+            analysis_queue.priority,
+            analysis_queue.attempts,
+            latest_decisions.decision
+        FROM analysis_queue
+        JOIN prs ON prs.id = analysis_queue.pr_id
+        LEFT JOIN latest_decisions ON latest_decisions.pr_id = prs.id
+        WHERE analysis_queue.status IN ({placeholders})
+        ORDER BY analysis_queue.priority ASC,
+                 prs.merged_at ASC,
+                 analysis_queue.id ASC
+        LIMIT ?
+        """,
+        parameters,
+    )
+
+    return [
+        AnalysisCandidate(
+            github_pr_number=int(row[0]),
+            github_pr_url=str(row[1]),
+            title=str(row[2]),
+            target_branch=str(row[3]),
+            merged_at=str(row[4]),
+            queue_status=str(row[5]),
+            priority=int(row[6]),
+            attempts=int(row[7]),
+            latest_decision=row[8],
+        )
+        for row in cursor.fetchall()
+    ]
 
 
 def list_saved_pull_requests(

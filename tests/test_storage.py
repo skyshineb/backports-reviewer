@@ -2,9 +2,11 @@ from pathlib import Path
 
 from backport_harness.storage import (
     connect,
+    create_analysis_queue_row_if_missing,
     get_pull_request_inspection,
     init_database,
     list_saved_pull_requests,
+    select_analysis_candidates,
 )
 
 
@@ -365,6 +367,173 @@ def test_get_pull_request_inspection_returns_failed_run_without_decision(
     assert inspection.test_runs[0].result == "passed"
 
 
+def test_create_analysis_queue_row_assigns_computed_priority(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        direct_pr_id = _insert_pr_without_queue(
+            connection,
+            number=1,
+            title="Add release fix",
+            branch="0.15",
+            merged_at="2024-01-01T00:00:00Z",
+        )
+        bugfix_pr_id = _insert_pr_without_queue(
+            connection,
+            number=2,
+            title="Fix NPE in compaction",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+        )
+        create_analysis_queue_row_if_missing(
+            connection,
+            direct_pr_id,
+            target_branch="0.15",
+            title="Add release fix",
+        )
+        create_analysis_queue_row_if_missing(
+            connection,
+            bugfix_pr_id,
+            target_branch="master",
+            title="Fix NPE in compaction",
+        )
+
+        rows = connection.execute(
+            """
+            SELECT prs.github_pr_number, analysis_queue.priority
+            FROM analysis_queue
+            JOIN prs ON prs.id = analysis_queue.pr_id
+            ORDER BY prs.github_pr_number
+            """
+        ).fetchall()
+
+    assert rows == [(1, 10), (2, 20)]
+
+
+def test_create_analysis_queue_row_does_not_overwrite_existing_queue_state(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Existing state",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="DONE",
+            priority=7,
+        )
+        create_analysis_queue_row_if_missing(
+            connection,
+            pr_id,
+            target_branch="0.15",
+            title="Fix important bug",
+        )
+
+        row = connection.execute(
+            """
+            SELECT status, priority
+            FROM analysis_queue
+            WHERE pr_id = ?
+            """,
+            (pr_id,),
+        ).fetchone()
+
+    assert row == ("DONE", 7)
+
+
+def test_select_analysis_candidates_orders_limits_and_skips_non_retryable(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=1,
+            title="Done",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="DONE",
+            priority=1,
+        )
+        _insert_saved_pr(
+            connection,
+            number=2,
+            title="Queued low",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=100,
+        )
+        _insert_saved_pr(
+            connection,
+            number=3,
+            title="Retry high",
+            branch="master",
+            merged_at="2024-01-03T00:00:00Z",
+            status="NEEDS_RETRY",
+            priority=10,
+        )
+        _insert_saved_pr(
+            connection,
+            number=4,
+            title="Queued same priority older",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=50,
+        )
+        _insert_saved_pr(
+            connection,
+            number=5,
+            title="Running",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="CODEX_RUNNING",
+            priority=1,
+        )
+        _insert_saved_pr(
+            connection,
+            number=6,
+            title="Paused",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="PAUSED",
+            priority=1,
+        )
+        _insert_saved_pr(
+            connection,
+            number=7,
+            title="Failed infra",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="FAILED_INFRA",
+            priority=1,
+        )
+        _insert_saved_pr(
+            connection,
+            number=8,
+            title="Reportable",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="REPORTABLE",
+            priority=1,
+        )
+
+        candidates = select_analysis_candidates(connection, limit=2)
+
+    assert [candidate.github_pr_number for candidate in candidates] == [3, 4]
+    assert candidates[0].queue_status == "NEEDS_RETRY"
+
+
 def _insert_saved_pr(
     connection,
     *,
@@ -421,6 +590,40 @@ def _insert_saved_pr(
         ),
     )
     return pr_id
+
+
+def _insert_pr_without_queue(
+    connection,
+    *,
+    number: int,
+    title: str,
+    branch: str,
+    merged_at: str,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO prs(
+            github_pr_number,
+            github_pr_url,
+            title,
+            target_branch,
+            merged_at,
+            created_in_db_at,
+            updated_in_db_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            number,
+            f"https://github.com/apache/hudi/pull/{number}",
+            title,
+            branch,
+            merged_at,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        ),
+    )
+    return int(cursor.lastrowid)
 
 
 def _insert_pr_file(

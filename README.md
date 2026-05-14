@@ -19,9 +19,10 @@ The current implementation covers milestones 001 through 005:
 - SQLite storage for PR metadata, changed files, scan audit rows, and analysis queue rows
 - saved PR listing with branch, queue status, date, limit, and ordering filters
 - detailed saved PR inspection with changed files, queue state, decisions, evidence, logs, tests, and review status
+- dry-run analysis candidate selection by queue priority
 - focused CLI, storage, and config tests
 
-It does not yet implement Codex execution, worktrees, reports, retries, or human review commands.
+It does not yet implement Codex execution, worktrees, reports, retry commands, or human review commands.
 
 ## Linux Setup
 
@@ -99,6 +100,17 @@ export GITHUB_TOKEN=...
 - It shows PR metadata, changed files, queue state, latest decision, evidence, analysis log paths, test runs, and human review status when present.
 - It does not scan GitHub, invoke Codex, or modify queue state.
 
+### Plan Analysis Candidates
+
+```sh
+.venv/bin/backport-harness --config config.yaml analyze --dry-run
+.venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 10
+```
+
+- `analyze --dry-run` selects queued PRs by priority and merge date.
+- It shows the PRs that would be analyzed later, without invoking Codex.
+- Running `analyze` without `--dry-run` currently fails because Codex execution is not implemented yet.
+
 ### Current Workflow
 
 ```sh
@@ -106,6 +118,7 @@ export GITHUB_TOKEN=...
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
 .venv/bin/backport-harness --config config.yaml list-prs --limit 20
 .venv/bin/backport-harness --config config.yaml inspect --pr 12345
+.venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
 ```
 
 ## Linux Test Commands
