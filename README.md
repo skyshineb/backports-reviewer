@@ -22,6 +22,7 @@ The current implementation covers milestones 001 through 005:
 - dry-run analysis candidate selection by queue priority
 - public upstream clone and OSS `0.15` worktree preparation
 - public Codex task bundle preparation for saved PRs
+- Codex prompt templates for analysis, test transplantation, and fix verification
 - focused CLI, storage, and config tests
 
 It does not yet implement Codex execution, reports, retry commands, or human review commands.
@@ -135,6 +136,7 @@ export GITHUB_TOKEN=...
 - It writes `pr.json`, `files_changed.json`, `pr.diff`, and `instructions.md`.
 - It pre-creates `output/`, `output/logs/`, and `output/patches/`.
 - It prepares a public OSS `0.15` worktree and references that path in the instructions.
+- It selects branch-specific Codex instructions from `prompts/`.
 - It does not invoke Codex or modify queue state.
 
 ### Current Workflow

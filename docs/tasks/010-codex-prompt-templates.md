@@ -6,13 +6,54 @@ Create prompt templates that define Codex analysis responsibilities, allowed dec
 
 ## Implementation Scope
 
-TBD from design docs before implementation. This milestone should create prompt files for `0.15` PR analysis, master PR analysis, test transplantation, and fix verification.
+- Create prompt files for `0.15` PR analysis, master PR analysis, test transplantation, and fix verification.
+- Move task-builder analysis instructions to repository prompt templates.
+- Select the `0.15` analysis prompt for PRs merged into upstream `0.15`.
+- Select the master analysis prompt for PRs merged into upstream `master`.
+- Keep test transplantation and fix verification prompts available for later milestones.
+- Require strict JSON output and the configured `output/codex_result.json` path.
+- Specify the JSON field shapes expected by later result schema and validator tasks.
+- Require the master PR analysis prompt to follow an ordered investigation sequence before deciding applicability.
+- Repeat the private-repo security boundary in every prompt.
+
+### PR 11 Comments 3, 5, and 6 Follow-up Scope
+
+- Add a narrow `FAILED_INFRA` policy to all four prompt templates.
+- Restrict `FAILED_INFRA` to command timeout, dependency resolution failure, filesystem error, unavailable test infrastructure, or unreadable required input files.
+- Require logical uncertainty to use `INCONCLUSIVE`, not `FAILED_INFRA`.
+- Add phase-specific allowed decision lists to the test transplantation and fix verification prompts.
+- Limit test transplantation and fix verification decision-specific requirements to decisions allowed in those phases.
+- Preserve and verify the existing confidence enum, with these exact mappings:
+  - `very_high`: test fails before fix and passes after adapted fix.
+  - `high`: regression test reproduces the bug on OSS 0.15.
+  - `medium`: relevant code/logic exists but no test proof.
+  - `low`: weak relevance signals only.
+  - `unknown`: inconclusive.
+- Preserve these earlier follow-up fixes while addressing the later PR comments below.
+
+### PR 11 Comments 7, 8, 9, and 10 Follow-up Scope
+
+- Add a master no-test policy: do not discard a master PR only because no regression test exists.
+- Require `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists without test proof.
+- Require `INCONCLUSIVE` when applicability is unsafe to determine from public context.
+- Add test execution limits: prefer the smallest focused command in this order: single test method, test class, then test module.
+- Avoid full project test commands unless no narrower command can verify the behavior.
+- Require every executed command, exit code, and related log path to be recorded, with logs under `output/logs/`.
+- Add modification boundaries: edit only public OSS 0.15 worktree files needed for transplant or fix verification.
+- Require patches to be written under `output/patches/`.
+- Forbid modifying task input files such as `pr.json`, `files_changed.json`, and `pr.diff`.
+- Remove vague worktree path wording from prompt templates and rely on the rendered `Public OSS 0.15 worktree: <path>` task context.
+- Require Codex to write `output/notes.md` alongside `output/codex_result.json`.
+- Forbid prose output outside `output/codex_result.json` and `output/notes.md`.
+- Do not implement phased prompt orchestration or `previous_result.json` inputs from the FYI note in this task.
 
 ## Expected Behavior
 
 - Prompts forbid private fork access.
 - Prompts require strict JSON output.
+- Prompts define structured JSON fields, allowed nulls, relative path rules, and decision-specific evidence expectations.
 - Prompts define allowed decision values.
+- The master PR prompt requires step-by-step investigation before writing a decision.
 - Prompts direct uncertain cases to `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`, not silent discard.
 
 ## Affected Modules or Commands
@@ -25,10 +66,24 @@ TBD from design docs before implementation. This milestone should create prompt 
 
 ## Test Plan
 
-TBD. At minimum, static tests should verify prompt files exist, include the security boundary, mention strict JSON output, and list allowed decision values.
+- Verify all prompt files exist.
+- Verify every prompt includes the private-repo security boundary.
+- Verify every prompt requires strict JSON output and references `output/codex_result.json`.
+- Verify every prompt defines the structured JSON contract details needed by later validation.
+- Verify the master PR prompt includes the required investigation sequence.
+- Verify analysis prompts list all allowed decision values.
+- Verify uncertain cases are directed to `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`.
+- Verify task builder selects the branch-specific analysis prompt.
+- Verify exact allowed decision lists for all four prompt templates.
+- Verify the narrow `FAILED_INFRA` policy text appears in every prompt.
+- Verify exact confidence enum mappings appear in every prompt.
+- Verify master no-test, focused test execution, modification boundary, rendered worktree context, and `output/notes.md` output policies.
 
 ## Assumptions and Explicit Non-goals
 
-- Do not implement this milestone until the task is expanded and checked against the design docs.
 - Prompt templates do not validate results; validation belongs to later milestones.
-
+- This milestone specifies the JSON contract in prompt text but does not implement the Python result schema or validator.
+- This milestone does not invoke Codex.
+- This milestone does not add the result schema model.
+- This milestone does not mutate SQLite or queue state.
+- This milestone does not implement phased prompt orchestration or previous result inputs.
