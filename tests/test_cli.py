@@ -53,6 +53,7 @@ def test_help_shows_commands() -> None:
     assert "analyze" in result.output
     assert "inspect" in result.output
     assert "list-prs" in result.output
+    assert "prepare" in result.output
     assert "scan" in result.output
     assert "version" in result.output
 
@@ -467,6 +468,89 @@ def test_analyze_rejects_invalid_limit(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "positive integer" in result.output
+
+
+def test_prepare_command_passes_pr_to_worktree_manager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    worktree_path = tmp_path / "workspace" / "worktrees" / "pr-12345-015"
+    write_valid_config(config_path)
+    calls = []
+
+    def fake_prepare_oss_015_worktree(config, *, pr_number):
+        calls.append((config, pr_number))
+        return worktree_path
+
+    monkeypatch.setattr(
+        "backport_harness.main.prepare_oss_015_worktree",
+        fake_prepare_oss_015_worktree,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "prepare",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0][1] == 12345
+    assert str(worktree_path) in result.output
+
+
+def test_prepare_command_rejects_invalid_pr(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "prepare",
+            "--pr",
+            "0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "positive integer" in result.output
+
+
+def test_prepare_command_reports_manager_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    def fake_prepare_oss_015_worktree(config, *, pr_number):
+        raise RuntimeError("git failed")
+
+    monkeypatch.setattr(
+        "backport_harness.main.prepare_oss_015_worktree",
+        fake_prepare_oss_015_worktree,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "prepare",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "git failed" in result.output
 
 
 def _insert_saved_pr(

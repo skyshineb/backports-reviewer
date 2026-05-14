@@ -20,9 +20,10 @@ The current implementation covers milestones 001 through 005:
 - saved PR listing with branch, queue status, date, limit, and ordering filters
 - detailed saved PR inspection with changed files, queue state, decisions, evidence, logs, tests, and review status
 - dry-run analysis candidate selection by queue priority
+- public upstream clone and OSS `0.15` worktree preparation
 - focused CLI, storage, and config tests
 
-It does not yet implement Codex execution, worktrees, reports, retry commands, or human review commands.
+It does not yet implement Codex execution, task bundles, reports, retry commands, or human review commands.
 
 ## Linux Setup
 
@@ -111,6 +112,18 @@ export GITHUB_TOKEN=...
 - It shows the PRs that would be analyzed later, without invoking Codex.
 - Running `analyze` without `--dry-run` currently fails because Codex execution is not implemented yet.
 
+### Prepare Public OSS Worktree
+
+```sh
+.venv/bin/backport-harness --config config.yaml prepare --pr 12345
+```
+
+- `prepare` clones the configured public upstream repository if needed.
+- It fetches configured upstream branches and creates a clean detached `origin/0.15` worktree.
+- The default worktree path is `workspace/worktrees/pr-12345-015/`.
+- It rejects configured private path overlaps and remote URL mismatches.
+- It does not invoke Codex, create task bundles, or modify SQLite.
+
 ### Current Workflow
 
 ```sh
@@ -119,6 +132,7 @@ export GITHUB_TOKEN=...
 .venv/bin/backport-harness --config config.yaml list-prs --limit 20
 .venv/bin/backport-harness --config config.yaml inspect --pr 12345
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
+.venv/bin/backport-harness --config config.yaml prepare --pr 12345
 ```
 
 ## Linux Test Commands

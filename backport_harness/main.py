@@ -14,6 +14,7 @@ from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
 from backport_harness.scanner import scan_pull_requests
 from backport_harness.storage import init_database
+from backport_harness.worktree_manager import prepare_oss_015_worktree
 
 app = typer.Typer(help="Public upstream backport review harness.")
 db_app = typer.Typer(help="Manage the harness SQLite database.")
@@ -193,6 +194,28 @@ def analyze(
         sqlite_path=_resolve_sqlite_path(ctx),
         limit=resolved_limit,
     )
+
+
+@app.command("prepare")
+def prepare(
+    ctx: typer.Context,
+    pr: int = typer.Option(
+        ...,
+        "--pr",
+        help="GitHub PR number to prepare a public OSS 0.15 worktree for.",
+    ),
+) -> None:
+    """Prepare a public OSS 0.15 worktree for one PR."""
+    if pr < 1:
+        raise typer.BadParameter("pr must be a positive integer.")
+
+    config = _require_config(ctx)
+    try:
+        worktree_path = prepare_oss_015_worktree(config, pr_number=pr)
+    except (RuntimeError, ValueError) as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(f"Prepared worktree at {worktree_path}")
 
 
 @db_app.command("init")
