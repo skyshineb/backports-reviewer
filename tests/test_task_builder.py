@@ -98,10 +98,35 @@ def test_build_task_bundle_generates_branch_specific_instructions(
 
     master_instructions = master_bundle.instructions_path.read_text(encoding="utf-8")
     branch_instructions = branch_bundle.instructions_path.read_text(encoding="utf-8")
+    assert "Analyze Upstream Master PR" in master_instructions
     assert "applicable to public OSS 0.15" in master_instructions
+    assert "Analyze Upstream 0.15 PR" in branch_instructions
     assert "DIRECT_015_BUGFIX" in branch_instructions
     assert "Do not use, request, infer, or reference private fork code" in master_instructions
     assert "output/codex_result.json" in branch_instructions
+
+
+def test_build_task_bundle_instructions_exclude_forbidden_private_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    sqlite_path = tmp_path / "workspace" / "db.sqlite3"
+    private_path = tmp_path / "private"
+    config = make_config(tmp_path, forbidden_private_prefixes=[private_path])
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, branch="master")
+    monkeypatch.setattr(
+        "backport_harness.task_builder.prepare_oss_015_worktree",
+        lambda config, pr_number: config.local_repo.worktree_dir / "pr-12345-015",
+    )
+    monkeypatch.setattr(
+        "backport_harness.task_builder.run_git",
+        lambda args: GitResult(args=args, stdout="diff\n", stderr=""),
+    )
+
+    bundle = build_task_bundle(config=config, sqlite_path=sqlite_path, pr_number=12345)
+
+    assert str(private_path) not in bundle.instructions_path.read_text(encoding="utf-8")
 
 
 def test_build_task_bundle_replaces_existing_safe_task_dir(

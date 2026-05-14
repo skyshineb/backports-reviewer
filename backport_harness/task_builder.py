@@ -7,6 +7,7 @@ from pathlib import Path
 
 from backport_harness.config import HarnessConfig
 from backport_harness.git_runner import run_git
+from backport_harness.prompt_templates import analysis_prompt_for_branch
 from backport_harness.security import (
     validate_no_path_overlap,
     validate_public_path,
@@ -178,48 +179,18 @@ def _instructions_for(
     pull_request: InspectedPullRequest,
     worktree_path: Path,
 ) -> str:
-    if pull_request.target_branch == "0.15":
-        task = (
-            "Classify whether this upstream 0.15 PR is a real bugfix candidate "
-            "for human review."
-        )
-        allowed_decisions = (
-            "DIRECT_015_BUGFIX, DISCARDED_NON_BUGFIX, DISCARDED_DOCS_ONLY, "
-            "DISCARDED_CI_ONLY, DISCARDED_RELEASE_ONLY, NEEDS_HUMAN_REVIEW, "
-            "INCONCLUSIVE, FAILED_INFRA"
-        )
-    else:
-        task = (
-            "Classify whether this master PR is a real bugfix and whether it is "
-            "applicable to public OSS 0.15."
-        )
-        allowed_decisions = (
-            "MASTER_NOT_APPLICABLE, MASTER_POSSIBLY_APPLICABLE, "
-            "MASTER_REPRODUCED_ON_015, MASTER_FIX_VERIFIED_ON_015, INCONCLUSIVE, "
-            "NEEDS_HUMAN_REVIEW, DISCARDED_NON_BUGFIX, DISCARDED_DOCS_ONLY, "
-            "DISCARDED_CI_ONLY, DISCARDED_RELEASE_ONLY, FAILED_INFRA"
-        )
-
+    prompt_template = analysis_prompt_for_branch(pull_request.target_branch)
     return f"""# Backport Analysis Task for PR #{pull_request.github_pr_number}
 
-## Security Boundary
+## Task-Specific Context
 
-Use only public upstream data included in this task bundle and the public OSS 0.15 worktree.
-Do not use, request, infer, or reference private fork code, private patches, private repository history, private test data, or private paths.
-
-## Public Context
-
-- PR metadata: `pr.json`
-- Changed files: `files_changed.json`
-- Public PR diff: `pr.diff`
+- PR number: `{pull_request.github_pr_number}`
+- Target branch: `{pull_request.target_branch}`
+- PR metadata file: `pr.json`
+- Changed files file: `files_changed.json`
+- Public PR diff file: `pr.diff`
 - Public OSS 0.15 worktree: `{worktree_path}`
+- Required result path: `{config.codex.result_file}`
 
-## Task
-
-{task}
-
-Allowed decisions: {allowed_decisions}
-
-Write strict JSON output to `{config.codex.result_file}`.
-If uncertain, choose `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`; do not silently discard uncertain cases.
+{prompt_template}
 """
