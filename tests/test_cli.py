@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from backport_harness import __version__
 from backport_harness.main import app
 from backport_harness.storage import connect, init_database
+from backport_harness.task_builder import TaskBundle
 
 
 runner = CliRunner()
@@ -54,6 +55,7 @@ def test_help_shows_commands() -> None:
     assert "inspect" in result.output
     assert "list-prs" in result.output
     assert "prepare" in result.output
+    assert "prepare-bundle" in result.output
     assert "scan" in result.output
     assert "version" in result.output
 
@@ -551,6 +553,94 @@ def test_prepare_command_reports_manager_errors(
 
     assert result.exit_code != 0
     assert "git failed" in result.output
+
+
+def test_prepare_bundle_command_passes_pr_to_builder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    task_dir = tmp_path / "workspace" / "tasks" / "pr-12345"
+    write_valid_config(config_path)
+    calls = []
+
+    def fake_build_task_bundle(**kwargs):
+        calls.append(kwargs)
+        return TaskBundle(
+            pr_number=12345,
+            task_dir=task_dir,
+            worktree_path=tmp_path / "workspace" / "worktrees" / "pr-12345-015",
+            pr_json_path=task_dir / "pr.json",
+            files_changed_json_path=task_dir / "files_changed.json",
+            diff_path=task_dir / "pr.diff",
+            instructions_path=task_dir / "instructions.md",
+            output_dir=task_dir / "output",
+            logs_dir=task_dir / "output" / "logs",
+            patches_dir=task_dir / "output" / "patches",
+        )
+
+    monkeypatch.setattr("backport_harness.main.build_task_bundle", fake_build_task_bundle)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "prepare-bundle",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["pr_number"] == 12345
+    assert str(task_dir) in result.output
+
+
+def test_prepare_bundle_command_rejects_invalid_pr(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "prepare-bundle",
+            "--pr",
+            "0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "positive integer" in result.output
+
+
+def test_prepare_bundle_command_reports_builder_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    def fake_build_task_bundle(**kwargs):
+        raise RuntimeError("bundle failed")
+
+    monkeypatch.setattr("backport_harness.main.build_task_bundle", fake_build_task_bundle)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "prepare-bundle",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "bundle failed" in result.output
 
 
 def _insert_saved_pr(

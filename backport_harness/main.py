@@ -14,6 +14,7 @@ from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
 from backport_harness.scanner import scan_pull_requests
 from backport_harness.storage import init_database
+from backport_harness.task_builder import build_task_bundle
 from backport_harness.worktree_manager import prepare_oss_015_worktree
 
 app = typer.Typer(help="Public upstream backport review harness.")
@@ -216,6 +217,32 @@ def prepare(
         raise typer.BadParameter(str(error)) from error
 
     typer.echo(f"Prepared worktree at {worktree_path}")
+
+
+@app.command("prepare-bundle")
+def prepare_bundle(
+    ctx: typer.Context,
+    pr: int = typer.Option(
+        ...,
+        "--pr",
+        help="GitHub PR number to prepare a public Codex task bundle for.",
+    ),
+) -> None:
+    """Prepare a public Codex task bundle for one saved PR."""
+    if pr < 1:
+        raise typer.BadParameter("pr must be a positive integer.")
+
+    config = _require_config(ctx)
+    try:
+        bundle = build_task_bundle(
+            config=config,
+            sqlite_path=config.storage.sqlite_path,
+            pr_number=pr,
+        )
+    except (RuntimeError, ValueError) as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(f"Prepared task bundle at {bundle.task_dir}")
 
 
 @db_app.command("init")
