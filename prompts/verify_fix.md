@@ -12,6 +12,27 @@ Adapt the public upstream fix to the public OSS 0.15 worktree only when the bug 
 Run the focused public test again when available.
 Save any adapted patch under `output/patches/` and logs under `output/logs/`.
 
+## No-Test Policy
+
+Do not discard a PR only because no regression test exists.
+Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.
+
+## Test Execution Limits
+
+Run the smallest focused command that can verify the behavior.
+Prefer commands in this order: single test method, then test class, then test module.
+Avoid full project tests unless no narrower command can verify the behavior.
+Record every executed command, exit code, and related log path in `output/codex_result.json`.
+Save every test or command log under `output/logs/`.
+
+## Modification Boundaries
+
+Only edit files in the public OSS 0.15 worktree that are needed for transplant or fix verification.
+Do not modify task input files, including `pr.json`, `files_changed.json`, and `pr.diff`.
+Write any generated patch under `output/patches/`.
+Write human-readable notes to `output/notes.md`.
+Do not write prose outside `output/codex_result.json` and `output/notes.md`.
+
 ## Allowed Decisions
 
 - `MASTER_FIX_VERIFIED_ON_015`
@@ -35,6 +56,8 @@ Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptat
 ## Strict JSON Output
 
 Write strict JSON only to `output/codex_result.json`.
+Write human-readable notes only to `output/notes.md`.
+Do not write prose outside `output/codex_result.json` and `output/notes.md`.
 Use `schema_version: 1`.
 Use only the allowed decision values listed above.
 

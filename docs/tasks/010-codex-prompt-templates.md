@@ -29,7 +29,23 @@ Create prompt templates that define Codex analysis responsibilities, allowed dec
   - `medium`: relevant code/logic exists but no test proof.
   - `low`: weak relevance signals only.
   - `unknown`: inconclusive.
-- Do not address PR comments 7-10 or the FYI note in this task.
+- Preserve these earlier follow-up fixes while addressing the later PR comments below.
+
+### PR 11 Comments 7, 8, 9, and 10 Follow-up Scope
+
+- Add a master no-test policy: do not discard a master PR only because no regression test exists.
+- Require `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists without test proof.
+- Require `INCONCLUSIVE` when applicability is unsafe to determine from public context.
+- Add test execution limits: prefer the smallest focused command in this order: single test method, test class, then test module.
+- Avoid full project test commands unless no narrower command can verify the behavior.
+- Require every executed command, exit code, and related log path to be recorded, with logs under `output/logs/`.
+- Add modification boundaries: edit only public OSS 0.15 worktree files needed for transplant or fix verification.
+- Require patches to be written under `output/patches/`.
+- Forbid modifying task input files such as `pr.json`, `files_changed.json`, and `pr.diff`.
+- Remove vague worktree path wording from prompt templates and rely on the rendered `Public OSS 0.15 worktree: <path>` task context.
+- Require Codex to write `output/notes.md` alongside `output/codex_result.json`.
+- Forbid prose output outside `output/codex_result.json` and `output/notes.md`.
+- Do not implement phased prompt orchestration or `previous_result.json` inputs from the FYI note in this task.
 
 ## Expected Behavior
 
@@ -61,6 +77,7 @@ Create prompt templates that define Codex analysis responsibilities, allowed dec
 - Verify exact allowed decision lists for all four prompt templates.
 - Verify the narrow `FAILED_INFRA` policy text appears in every prompt.
 - Verify exact confidence enum mappings appear in every prompt.
+- Verify master no-test, focused test execution, modification boundary, rendered worktree context, and `output/notes.md` output policies.
 
 ## Assumptions and Explicit Non-goals
 
@@ -69,3 +86,4 @@ Create prompt templates that define Codex analysis responsibilities, allowed dec
 - This milestone does not invoke Codex.
 - This milestone does not add the result schema model.
 - This milestone does not mutate SQLite or queue state.
+- This milestone does not implement phased prompt orchestration or previous result inputs.

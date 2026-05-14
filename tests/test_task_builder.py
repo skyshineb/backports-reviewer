@@ -100,10 +100,21 @@ def test_build_task_bundle_generates_branch_specific_instructions(
     branch_instructions = branch_bundle.instructions_path.read_text(encoding="utf-8")
     assert "Analyze Upstream Master PR" in master_instructions
     assert "applicable to public OSS 0.15" in master_instructions
+    assert (
+        f"Public OSS 0.15 worktree: `{config.local_repo.worktree_dir / 'pr-1-015'}`"
+        in master_instructions
+    )
+    assert "worktree path supplied by the task builder" not in master_instructions
     assert "Analyze Upstream 0.15 PR" in branch_instructions
     assert "DIRECT_015_BUGFIX" in branch_instructions
+    assert (
+        f"Public OSS 0.15 worktree: `{config.local_repo.worktree_dir / 'pr-2-015'}`"
+        in branch_instructions
+    )
+    assert "worktree path supplied by the task builder" not in branch_instructions
     assert "Do not use, request, infer, or reference private fork code" in master_instructions
     assert "output/codex_result.json" in branch_instructions
+    assert "output/notes.md" in branch_instructions
 
 
 def test_build_task_bundle_instructions_exclude_forbidden_private_paths(

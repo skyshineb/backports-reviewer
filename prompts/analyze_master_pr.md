@@ -11,13 +11,35 @@ If applicability cannot be determined from public upstream context, choose `INCO
 - PR metadata: `pr.json`
 - Changed files: `files_changed.json`
 - Public PR diff: `pr.diff`
-- Public OSS 0.15 worktree path supplied by the task builder
+- Public OSS 0.15 worktree from the rendered task context line `Public OSS 0.15 worktree: <path>`
 
 ## Responsibility
 
 Decide whether this PR merged into upstream `master` is a real bugfix.
 If it is a bugfix, decide whether the affected code exists in public OSS `0.15` and whether the fix is applicable to public OSS 0.15.
 Do not silently discard uncertain cases.
+
+## Master No-Test Policy
+
+Do not discard a master PR only because no regression test exists.
+Use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists but there is no test proof.
+Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.
+
+## Test Execution Limits
+
+Run the smallest focused command that can verify the behavior.
+Prefer commands in this order: single test method, then test class, then test module.
+Avoid full project tests unless no narrower command can verify the behavior.
+Record every executed command, exit code, and related log path in `output/codex_result.json`.
+Save every test or command log under `output/logs/`.
+
+## Modification Boundaries
+
+Only edit files in the public OSS 0.15 worktree that are needed for transplant or fix verification.
+Do not modify task input files, including `pr.json`, `files_changed.json`, and `pr.diff`.
+Write any generated patch under `output/patches/`.
+Write human-readable notes to `output/notes.md`.
+Do not write prose outside `output/codex_result.json` and `output/notes.md`.
 
 ## Required Investigation Sequence
 
@@ -33,7 +55,7 @@ Follow this sequence before choosing a decision:
 8. Decide whether to discard, mark possibly applicable, reproduce with a test, or verify an adapted fix.
 9. If a usable public regression test exists, try the smallest focused test transplant.
 10. If reproduction succeeds, optionally apply or adapt the public fix and verify with the focused test.
-11. Write strict JSON to `output/codex_result.json`.
+11. Write strict JSON to `output/codex_result.json` and human-readable notes to `output/notes.md`.
 
 ## Allowed Decisions
 
@@ -64,6 +86,8 @@ Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptat
 ## Strict JSON Output
 
 Write strict JSON only to `output/codex_result.json`.
+Write human-readable notes only to `output/notes.md`.
+Do not write prose outside `output/codex_result.json` and `output/notes.md`.
 Use `schema_version: 1`.
 Use only the allowed decision values listed above.
 

@@ -82,6 +82,35 @@ STRUCTURED_CONTRACT_SNIPPETS = [
     "Patch paths must be under `output/patches/`.",
     "Use null only for fields that are explicitly unavailable",
 ]
+NOTES_OUTPUT_SNIPPETS = [
+    "Write human-readable notes only to `output/notes.md`.",
+    "Do not write prose outside `output/codex_result.json` and `output/notes.md`.",
+]
+TEST_EXECUTION_LIMIT_SNIPPETS = [
+    "Run the smallest focused command that can verify the behavior.",
+    "Prefer commands in this order: single test method, then test class, then test module.",
+    "Avoid full project tests unless no narrower command can verify the behavior.",
+    "Record every executed command, exit code, and related log path in `output/codex_result.json`.",
+    "Save every test or command log under `output/logs/`.",
+]
+MODIFICATION_BOUNDARY_SNIPPETS = [
+    "Only edit files in the public OSS 0.15 worktree that are needed for transplant or fix verification.",
+    "Do not modify task input files, including `pr.json`, `files_changed.json`, and `pr.diff`.",
+    "Write any generated patch under `output/patches/`.",
+]
+NO_TEST_POLICY_SNIPPETS = [
+    "Do not discard a PR only because no regression test exists.",
+    "Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.",
+]
+MASTER_NO_TEST_POLICY_SNIPPETS = [
+    "Do not discard a master PR only because no regression test exists.",
+    "Use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists but there is no test proof.",
+    "Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.",
+]
+WORKTREE_CONTEXT_SNIPPET = (
+    "Public OSS 0.15 worktree from the rendered task context line "
+    "`Public OSS 0.15 worktree: <path>`"
+)
 ANALYZE_015_DECISIONS = [
     "DIRECT_015_BUGFIX",
     "DISCARDED_NON_BUGFIX",
@@ -178,7 +207,7 @@ MASTER_INVESTIGATION_SEQUENCE = [
     "8. Decide whether to discard, mark possibly applicable, reproduce with a test, or verify an adapted fix.",
     "9. If a usable public regression test exists, try the smallest focused test transplant.",
     "10. If reproduction succeeds, optionally apply or adapt the public fix and verify with the focused test.",
-    "11. Write strict JSON to `output/codex_result.json`.",
+    "11. Write strict JSON to `output/codex_result.json` and human-readable notes to `output/notes.md`.",
 ]
 
 
@@ -212,6 +241,7 @@ def test_prompts_include_security_boundary_json_contract_and_uncertain_policy() 
         assert "private test data" in content
         assert "strict JSON" in content
         assert "output/codex_result.json" in content
+        assert "output/notes.md" in content
         assert "INCONCLUSIVE" in content or "NEEDS_HUMAN_REVIEW" in content
         for required_field in REQUIRED_JSON_FIELDS:
             assert required_field in content
@@ -244,6 +274,52 @@ def test_prompts_define_narrow_failed_infra_policy() -> None:
         assert "## FAILED_INFRA Policy" in content
         for snippet in FAILED_INFRA_POLICY_SNIPPETS:
             assert snippet in content
+
+
+def test_prompts_define_notes_output_and_no_extra_prose_policy() -> None:
+    for prompt_file in PROMPT_FILES:
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
+        for snippet in NOTES_OUTPUT_SNIPPETS:
+            assert snippet in content
+
+
+def test_prompts_define_focused_test_execution_limits() -> None:
+    for prompt_file in PROMPT_FILES:
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
+        for snippet in TEST_EXECUTION_LIMIT_SNIPPETS:
+            assert snippet in content
+
+
+def test_prompts_define_modification_boundaries() -> None:
+    for prompt_file in PROMPT_FILES:
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
+        for snippet in MODIFICATION_BOUNDARY_SNIPPETS:
+            assert snippet in content
+
+
+def test_prompts_define_no_test_policy() -> None:
+    for prompt_file in ("analyze_015_pr.md", "transplant_test.md", "verify_fix.md"):
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
+        for snippet in NO_TEST_POLICY_SNIPPETS:
+            assert snippet in content
+
+    master_content = (PROMPTS_DIR / "analyze_master_pr.md").read_text(
+        encoding="utf-8"
+    )
+    for snippet in MASTER_NO_TEST_POLICY_SNIPPETS:
+        assert snippet in master_content
+
+
+def test_analysis_prompts_rely_on_rendered_worktree_context() -> None:
+    for prompt_file in ("analyze_015_pr.md", "analyze_master_pr.md"):
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
+        assert WORKTREE_CONTEXT_SNIPPET in content
+        assert "worktree path supplied by the task builder" not in content
 
 
 def test_prompts_define_decision_specific_evidence_requirements() -> None:
