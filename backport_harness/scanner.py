@@ -88,7 +88,12 @@ def _scan_branch(
             with connect(sqlite_path) as connection:
                 pr_id = upsert_pull_request(connection, pull_request)
                 replace_pull_request_files(connection, pr_id, files)
-                create_analysis_queue_row_if_missing(connection, pr_id)
+                create_analysis_queue_row_if_missing(
+                    connection,
+                    pr_id,
+                    target_branch=pull_request.base_ref,
+                    title=pull_request.title,
+                )
             prs_saved += 1
 
         with connect(sqlite_path) as connection:

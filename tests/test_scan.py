@@ -91,7 +91,7 @@ def test_scan_one_branch_saves_pr_files_queue_and_scan_run(tmp_path: Path) -> No
     assert summary.prs_seen == 1
     assert summary.prs_saved == 1
     assert prs == [(101, "master", "Fix 101")]
-    assert queue == [("QUEUED_FOR_ANALYSIS", 100, 0)]
+    assert queue == [("QUEUED_FOR_ANALYSIS", 20, 0)]
     assert scan_runs == [("master", "SUCCESS", 1, 1, None)]
     assert (".github/workflows/ci.yml", 0, 0, 1) in files
     assert ("docs/usage.md", 0, 1, 0) in files

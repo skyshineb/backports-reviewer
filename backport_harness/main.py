@@ -6,8 +6,10 @@ from typing import Optional
 import typer
 
 from backport_harness import __version__
+from backport_harness.commands.analyze import render_analyze_dry_run
 from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
+from backport_harness.config import DEFAULT_ANALYSIS_LIMIT
 from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
 from backport_harness.scanner import scan_pull_requests
@@ -165,6 +167,34 @@ def inspect(
     render_inspect_pr(sqlite_path=_resolve_sqlite_path(ctx), pr_number=pr)
 
 
+@app.command("analyze")
+def analyze(
+    ctx: typer.Context,
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Maximum number of queued PRs to select.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show selected PRs without invoking Codex.",
+    ),
+) -> None:
+    """Plan analysis candidates from the local SQLite queue."""
+    if not dry_run:
+        raise typer.BadParameter("Codex analysis is not implemented yet; use --dry-run.")
+
+    resolved_limit = _resolve_analysis_limit(ctx) if limit is None else limit
+    if resolved_limit < 1:
+        raise typer.BadParameter("limit must be a positive integer.")
+
+    render_analyze_dry_run(
+        sqlite_path=_resolve_sqlite_path(ctx),
+        limit=resolved_limit,
+    )
+
+
 @db_app.command("init")
 def db_init(ctx: typer.Context) -> None:
     """Create or update the harness SQLite database."""
@@ -179,6 +209,14 @@ def _resolve_sqlite_path(ctx: typer.Context) -> Path:
         return DEFAULT_SQLITE_PATH
 
     return config.storage.sqlite_path
+
+
+def _resolve_analysis_limit(ctx: typer.Context) -> int:
+    config = ctx.obj.get("config") if ctx.obj else None
+    if not isinstance(config, HarnessConfig):
+        return DEFAULT_ANALYSIS_LIMIT
+
+    return config.analysis.default_limit
 
 
 def _require_config(ctx: typer.Context) -> HarnessConfig:
