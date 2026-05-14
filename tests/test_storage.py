@@ -253,6 +253,7 @@ def test_get_pull_request_inspection_returns_pre_analysis_pr(
     assert inspection.queue.status == "QUEUED_FOR_ANALYSIS"
     assert inspection.files[0].filename == "src/test/TestHoodie.java"
     assert inspection.files[0].is_test_file is True
+    assert inspection.latest_analysis_run is None
     assert inspection.latest_decision is None
     assert inspection.evidence == []
     assert inspection.test_runs == []
@@ -311,6 +312,8 @@ def test_get_pull_request_inspection_returns_post_analysis_details(
     assert inspection is not None
     assert inspection.latest_decision is not None
     assert inspection.latest_decision.decision == "MASTER_NOT_APPLICABLE"
+    assert inspection.latest_analysis_run is not None
+    assert inspection.latest_analysis_run.run_id == "run-2"
     assert inspection.latest_decision.analysis_run.run_id == "run-2"
     assert (
         inspection.latest_decision.analysis_run.stdout_log_path
@@ -322,6 +325,44 @@ def test_get_pull_request_inspection_returns_post_analysis_details(
     assert inspection.test_runs[0].result == "passed"
     assert inspection.human_review is not None
     assert inspection.human_review.status == "accepted_for_backport"
+
+
+def test_get_pull_request_inspection_returns_failed_run_without_decision(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Failed run PR",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="FAILED_INFRA",
+            priority=50,
+        )
+        failed_run_id = _insert_analysis_run(
+            connection,
+            pr_id=pr_id,
+            run_id="failed-run",
+            stdout_log_path="workspace/tasks/pr-12345/output/failed-stdout.log",
+        )
+        _insert_test_run(connection, analysis_run_id=failed_run_id)
+
+        inspection = get_pull_request_inspection(connection, pr_number=12345)
+
+    assert inspection is not None
+    assert inspection.latest_decision is None
+    assert inspection.latest_analysis_run is not None
+    assert inspection.latest_analysis_run.run_id == "failed-run"
+    assert (
+        inspection.latest_analysis_run.stdout_log_path
+        == "workspace/tasks/pr-12345/output/failed-stdout.log"
+    )
+    assert len(inspection.test_runs) == 1
+    assert inspection.test_runs[0].result == "passed"
 
 
 def _insert_saved_pr(

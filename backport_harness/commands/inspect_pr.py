@@ -34,6 +34,8 @@ def render_inspect_pr(
     _render_pull_request(console, pull_request)
     _render_files(console, pull_request)
     _render_decision(console, pull_request)
+    _render_analysis_run(console, pull_request)
+    _render_test_runs(console, pull_request)
     _render_human_review(console, pull_request)
 
 
@@ -114,17 +116,34 @@ def _render_decision(console: Console, pull_request: InspectedPullRequest) -> No
     table.add_row("Reason", decision.reason)
     table.add_row("Human action", decision.human_action or "-")
     table.add_row("Created at", decision.created_at)
-    table.add_row("Run ID", decision.analysis_run.run_id)
-    table.add_row("Run status", decision.analysis_run.status)
-    table.add_row("Task dir", decision.analysis_run.task_dir)
-    table.add_row("Result JSON", decision.analysis_run.result_json_path or "-")
-    table.add_row("Notes", decision.analysis_run.notes_path or "-")
-    table.add_row("Stdout log", decision.analysis_run.stdout_log_path or "-")
-    table.add_row("Stderr log", decision.analysis_run.stderr_log_path or "-")
     console.print(Panel(table, title="Latest Decision", expand=False))
 
     _render_evidence(console, pull_request)
-    _render_test_runs(console, pull_request)
+
+
+def _render_analysis_run(
+    console: Console,
+    pull_request: InspectedPullRequest,
+) -> None:
+    if pull_request.latest_analysis_run is None:
+        console.print(Panel("No analysis run recorded.", title="Latest Analysis Run"))
+        return
+
+    analysis_run = pull_request.latest_analysis_run
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row("Run ID", analysis_run.run_id)
+    table.add_row("Status", analysis_run.status)
+    table.add_row("Started at", analysis_run.started_at)
+    table.add_row("Finished at", analysis_run.finished_at or "-")
+    table.add_row("Codex exit", _format_optional_int(analysis_run.codex_exit_code))
+    table.add_row("Task dir", analysis_run.task_dir)
+    table.add_row("Result JSON", analysis_run.result_json_path or "-")
+    table.add_row("Notes", analysis_run.notes_path or "-")
+    table.add_row("Stdout log", analysis_run.stdout_log_path or "-")
+    table.add_row("Stderr log", analysis_run.stderr_log_path or "-")
+    console.print(Panel(table, title="Latest Analysis Run", expand=False))
 
 
 def _render_evidence(console: Console, pull_request: InspectedPullRequest) -> None:

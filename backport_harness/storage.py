@@ -50,6 +50,7 @@ class InspectedQueueState:
 
 @dataclass(frozen=True)
 class InspectedAnalysisRun:
+    id: int
     run_id: str
     started_at: str
     finished_at: str | None
@@ -119,6 +120,7 @@ class InspectedPullRequest:
     author: str | None
     queue: InspectedQueueState | None
     files: list[InspectedPullRequestFile]
+    latest_analysis_run: InspectedAnalysisRun | None
     latest_decision: InspectedDecision | None
     evidence: list[InspectedEvidence]
     test_runs: list[InspectedTestRun]
@@ -466,6 +468,7 @@ def get_pull_request_inspection(
         )
 
     files = _get_inspected_files(connection, pr_id)
+    latest_analysis_run = _get_latest_inspected_analysis_run(connection, pr_id)
     latest_decision = _get_latest_inspected_decision(connection, pr_id)
     evidence: list[InspectedEvidence] = []
     test_runs: list[InspectedTestRun] = []
@@ -476,9 +479,11 @@ def get_pull_request_inspection(
             pr_id=pr_id,
             analysis_run_id=latest_decision.analysis_run_id,
         )
+
+    if latest_analysis_run is not None:
         test_runs = _get_inspected_test_runs(
             connection,
-            analysis_run_id=latest_decision.analysis_run_id,
+            analysis_run_id=latest_analysis_run.id,
         )
 
     return InspectedPullRequest(
@@ -496,6 +501,7 @@ def get_pull_request_inspection(
         author=pr_row[12],
         queue=queue,
         files=files,
+        latest_analysis_run=latest_analysis_run,
         latest_decision=latest_decision.decision if latest_decision else None,
         evidence=evidence,
         test_runs=test_runs,
@@ -664,6 +670,7 @@ def _get_latest_inspected_decision(
             human_action=row[6],
             created_at=str(row[7]),
             analysis_run=InspectedAnalysisRun(
+                id=int(row[0]),
                 run_id=str(row[8]),
                 started_at=str(row[9]),
                 finished_at=row[10],
@@ -676,6 +683,50 @@ def _get_latest_inspected_decision(
                 stderr_log_path=row[17],
             ),
         ),
+    )
+
+
+def _get_latest_inspected_analysis_run(
+    connection: sqlite3.Connection,
+    pr_id: int,
+) -> InspectedAnalysisRun | None:
+    row = connection.execute(
+        """
+        SELECT
+            id,
+            run_id,
+            started_at,
+            finished_at,
+            codex_exit_code,
+            status,
+            task_dir,
+            result_json_path,
+            notes_path,
+            stdout_log_path,
+            stderr_log_path
+        FROM analysis_runs
+        WHERE pr_id = ?
+        ORDER BY started_at DESC, id DESC
+        LIMIT 1
+        """,
+        (pr_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return InspectedAnalysisRun(
+        id=int(row[0]),
+        run_id=str(row[1]),
+        started_at=str(row[2]),
+        finished_at=row[3],
+        codex_exit_code=row[4],
+        status=str(row[5]),
+        task_dir=str(row[6]),
+        result_json_path=row[7],
+        notes_path=row[8],
+        stdout_log_path=row[9],
+        stderr_log_path=row[10],
     )
 
 

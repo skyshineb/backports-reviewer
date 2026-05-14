@@ -361,11 +361,37 @@ def test_inspect_displays_post_analysis_details(tmp_path: Path) -> None:
     assert "accepted_for_backport" in result.output
 
 
+def test_inspect_displays_failed_analysis_run_without_decision(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, with_failed_analysis=True)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "inspect",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "No decision recorded yet." in result.output
+    assert "failed-run" in result.output
+    assert "workspace/tasks/pr-12345/output/failed-stdout.log" in result.output
+    assert "mvn test" in result.output
+
+
 def _insert_saved_pr(
     sqlite_path: Path,
     *,
     with_file: bool = False,
     with_analysis: bool = False,
+    with_failed_analysis: bool = False,
 ) -> None:
     with connect(sqlite_path) as connection:
         cursor = connection.execute(
@@ -449,9 +475,23 @@ def _insert_saved_pr(
             _insert_evidence_details(connection, decision_id=decision_id)
             _insert_test_details(connection, analysis_run_id=analysis_run_id)
             _insert_review_details(connection, pr_id=pr_id)
+        if with_failed_analysis:
+            analysis_run_id = _insert_analysis_details(
+                connection,
+                pr_id=pr_id,
+                run_id="failed-run",
+                stdout_log_path="workspace/tasks/pr-12345/output/failed-stdout.log",
+            )
+            _insert_test_details(connection, analysis_run_id=analysis_run_id)
 
 
-def _insert_analysis_details(connection, *, pr_id: int) -> int:
+def _insert_analysis_details(
+    connection,
+    *,
+    pr_id: int,
+    run_id: str = "run-1",
+    stdout_log_path: str = "workspace/tasks/pr-12345/output/stdout.log",
+) -> int:
     cursor = connection.execute(
         """
         INSERT INTO analysis_runs(
@@ -471,7 +511,7 @@ def _insert_analysis_details(connection, *, pr_id: int) -> int:
         """,
         (
             pr_id,
-            "run-1",
+            run_id,
             "2024-01-01T00:00:00Z",
             "2024-01-01T00:10:00Z",
             0,
@@ -479,7 +519,7 @@ def _insert_analysis_details(connection, *, pr_id: int) -> int:
             "workspace/tasks/pr-12345",
             "workspace/tasks/pr-12345/output/codex_result.json",
             "workspace/tasks/pr-12345/output/notes.md",
-            "workspace/tasks/pr-12345/output/stdout.log",
+            stdout_log_path,
             "workspace/tasks/pr-12345/output/stderr.log",
         ),
     )
