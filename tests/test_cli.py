@@ -56,6 +56,7 @@ def test_help_shows_commands() -> None:
     assert "list-prs" in result.output
     assert "prepare" in result.output
     assert "prepare-bundle" in result.output
+    assert "report" in result.output
     assert "scan" in result.output
     assert "version" in result.output
 
@@ -388,6 +389,23 @@ def test_inspect_displays_failed_analysis_run_without_decision(tmp_path: Path) -
     assert "failed-run" in result.output
     assert "workspace/tasks/pr-12345/output/failed-stdout.log" in result.output
     assert "mvn test" in result.output
+
+
+def test_report_writes_configured_report_directory_for_missing_database(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+
+    result = runner.invoke(app, ["--config", str(config_path), "report"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "reports" / "backport-candidates.md").is_file()
+    assert (tmp_path / "reports" / "inconclusive.md").is_file()
+    assert (tmp_path / "reports" / "discarded.jsonl").is_file()
+    assert (tmp_path / "reports" / "full-audit.jsonl").is_file()
+    assert "Generated reports" in result.output
 
 
 def test_analyze_dry_run_reports_empty_database(tmp_path: Path) -> None:
