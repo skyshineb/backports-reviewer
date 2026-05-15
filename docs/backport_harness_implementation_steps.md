@@ -615,6 +615,7 @@ Require strong non-applicability reason:
 - Affected module absent.
 - Feature absent.
 - Bug introduced after `0.15`.
+- Fix behavior already present in public OSS `0.15`.
 
 #### `INCONCLUSIVE`
 

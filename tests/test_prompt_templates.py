@@ -173,6 +173,7 @@ ANALYSIS_DECISION_SPECIFIC_REQUIREMENTS = [
     "infra_failure` evidence",
     "`test_failure` evidence item",
     "`test_pass` evidence item",
+    "fix behavior already present in public OSS 0.15",
 ]
 TRANSPLANT_DECISION_SPECIFIC_REQUIREMENTS = [
     "MASTER_REPRODUCED_ON_015",
