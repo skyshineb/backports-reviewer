@@ -12,6 +12,7 @@ from backport_harness.state_machine import (
     QUEUE_STATUS_NEEDS_RETRY,
     QUEUE_STATUS_QUEUED,
     QUEUE_STATUS_RUNNING,
+    QUEUE_STATUS_VALIDATED,
     RETRYABLE_QUEUE_STATUSES,
     assign_initial_priority,
 )
@@ -545,6 +546,52 @@ def finish_analysis_run(
         WHERE pr_id = ?
         """,
         (queue_status, last_error, now, pr_id),
+    )
+
+
+def finish_result_validation(
+    connection: sqlite3.Connection,
+    *,
+    pr_id: int,
+    analysis_run_id: int,
+    valid: bool,
+    attempts: int,
+    max_attempts: int,
+    last_error: str | None = None,
+) -> None:
+    now = _utc_now()
+    if valid:
+        run_status = "VALIDATED"
+        queue_status = QUEUE_STATUS_VALIDATED
+        stored_error = None
+    else:
+        run_status = "INVALID_RESULT"
+        queue_status = (
+            QUEUE_STATUS_NEEDS_RETRY
+            if attempts < max_attempts
+            else QUEUE_STATUS_FAILED_INFRA
+        )
+        stored_error = last_error or "Codex result failed validation."
+
+    connection.execute(
+        """
+        UPDATE analysis_runs
+        SET status = ?
+        WHERE id = ?
+        """,
+        (run_status, analysis_run_id),
+    )
+    connection.execute(
+        """
+        UPDATE analysis_queue
+        SET status = ?,
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = ?,
+            updated_at = ?
+        WHERE pr_id = ?
+        """,
+        (queue_status, stored_error, now, pr_id),
     )
 
 

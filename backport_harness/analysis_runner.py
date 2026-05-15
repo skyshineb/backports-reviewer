@@ -6,7 +6,13 @@ from dataclasses import dataclass
 
 from backport_harness.codex_runner import CodexRunRequest, CodexRunResult, run_codex
 from backport_harness.config import HarnessConfig
-from backport_harness.storage import connect, finish_analysis_run, start_analysis_run
+from backport_harness.result_validator import ValidationOutcome, validate_codex_result_file
+from backport_harness.storage import (
+    connect,
+    finish_analysis_run,
+    finish_result_validation,
+    start_analysis_run,
+)
 from backport_harness.task_builder import build_task_bundle, resolve_task_dir
 
 
@@ -16,6 +22,7 @@ class AnalyzeOneResult:
     run_id: str
     task_dir: str
     codex_result: CodexRunResult
+    validation: ValidationOutcome | None
 
 
 def analyze_one_pr(
@@ -93,9 +100,29 @@ def analyze_one_pr(
             max_attempts=config.codex.max_attempts_per_pr,
         )
 
+    validation = None
+    if codex_result.exit_code == 0 and not codex_result.timed_out:
+        validation = validate_codex_result_file(
+            task_dir=bundle.task_dir,
+            result_path=bundle.task_dir / config.codex.result_file,
+        )
+        with connect(config.storage.sqlite_path) as connection:
+            finish_result_validation(
+                connection,
+                pr_id=analysis_start.pr_id,
+                analysis_run_id=analysis_start.analysis_run_id,
+                valid=validation.valid,
+                attempts=analysis_start.attempts,
+                max_attempts=config.codex.max_attempts_per_pr,
+                last_error=None if validation.valid else validation.summary,
+            )
+        if not validation.valid:
+            raise RuntimeError(f"Codex result failed validation: {validation.summary}")
+
     return AnalyzeOneResult(
         pr_number=pr_number,
         run_id=run_id,
         task_dir=str(bundle.task_dir),
         codex_result=codex_result,
+        validation=validation,
     )
