@@ -69,6 +69,33 @@ class RecoveredStaleRun:
 
 
 @dataclass(frozen=True)
+class RetriedPullRequest:
+    pr_id: int
+    github_pr_number: int
+    target_branch: str
+    previous_status: str
+    attempts: int
+    latest_decision: str | None
+
+
+@dataclass(frozen=True)
+class SkippedRetryPullRequest:
+    pr_id: int | None
+    github_pr_number: int
+    target_branch: str | None
+    status: str | None
+    attempts: int | None
+    latest_decision: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class RetryPullRequestsResult:
+    retried: list[RetriedPullRequest]
+    skipped: list[SkippedRetryPullRequest]
+
+
+@dataclass(frozen=True)
 class InspectedPullRequestFile:
     filename: str
     status: str | None
@@ -731,6 +758,50 @@ def recover_stale_runs(
     return recovered
 
 
+def retry_pull_requests(
+    connection: sqlite3.Connection,
+    *,
+    max_attempts: int,
+    pr_number: int | None = None,
+    status: str | None = None,
+    limit: int | None = None,
+) -> RetryPullRequestsResult:
+    if max_attempts <= 0:
+        raise ValueError("max_attempts must be positive.")
+    if (pr_number is None) == (status is None):
+        raise ValueError("Exactly one retry selector is required.")
+    if pr_number is not None and pr_number <= 0:
+        raise ValueError("pr_number must be positive.")
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be positive.")
+    if pr_number is not None and limit is not None:
+        raise ValueError("limit cannot be combined with pr_number.")
+    if status is not None and status not in {
+        QUEUE_STATUS_NEEDS_RETRY,
+        QUEUE_STATUS_FAILED_INFRA,
+    }:
+        raise ValueError(
+            "Bulk retry supports only NEEDS_RETRY or FAILED_INFRA. "
+            "Use --pr to retry an INCONCLUSIVE decision."
+        )
+
+    if pr_number is not None:
+        return _retry_pull_request_by_number(
+            connection,
+            pr_number=pr_number,
+            max_attempts=max_attempts,
+        )
+
+    assert status is not None
+    assert limit is not None
+    return _retry_pull_requests_by_status(
+        connection,
+        status=status,
+        limit=limit,
+        max_attempts=max_attempts,
+    )
+
+
 def store_validated_decision(
     connection: sqlite3.Connection,
     *,
@@ -1212,6 +1283,217 @@ def is_ci_file(filename: str) -> bool:
         or normalized.startswith(".circleci/")
         or normalized.startswith("ci/")
         or name == "jenkinsfile"
+    )
+
+
+def _retry_pull_request_by_number(
+    connection: sqlite3.Connection,
+    *,
+    pr_number: int,
+    max_attempts: int,
+) -> RetryPullRequestsResult:
+    row = connection.execute(
+        """
+        WITH latest_decisions AS (
+            SELECT ranked.pr_id, ranked.decision
+            FROM (
+                SELECT
+                    decisions.pr_id,
+                    decisions.decision,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY decisions.pr_id
+                        ORDER BY decisions.created_at DESC, decisions.id DESC
+                    ) AS row_number
+                FROM decisions
+            ) AS ranked
+            WHERE ranked.row_number = 1
+        )
+        SELECT
+            prs.id,
+            prs.github_pr_number,
+            prs.target_branch,
+            analysis_queue.status,
+            analysis_queue.attempts,
+            latest_decisions.decision
+        FROM prs
+        JOIN analysis_queue ON analysis_queue.pr_id = prs.id
+        LEFT JOIN latest_decisions ON latest_decisions.pr_id = prs.id
+        WHERE prs.github_pr_number = ?
+        ORDER BY prs.target_branch ASC
+        LIMIT 1
+        """,
+        (pr_number,),
+    ).fetchone()
+
+    if row is None:
+        return RetryPullRequestsResult(
+            retried=[],
+            skipped=[
+                SkippedRetryPullRequest(
+                    pr_id=None,
+                    github_pr_number=pr_number,
+                    target_branch=None,
+                    status=None,
+                    attempts=None,
+                    latest_decision=None,
+                    reason="saved PR not found",
+                )
+            ],
+        )
+
+    retry_row = _retry_row_from_sql(row)
+    skip_reason = _pr_retry_skip_reason(retry_row, max_attempts=max_attempts)
+    if skip_reason is not None:
+        return RetryPullRequestsResult(
+            retried=[],
+            skipped=[_skipped_retry_pull_request(retry_row, skip_reason)],
+        )
+
+    _reset_queue_rows_for_retry(connection, [retry_row.pr_id])
+    return RetryPullRequestsResult(
+        retried=[
+            RetriedPullRequest(
+                pr_id=retry_row.pr_id,
+                github_pr_number=retry_row.github_pr_number,
+                target_branch=retry_row.target_branch,
+                previous_status=retry_row.status,
+                attempts=retry_row.attempts,
+                latest_decision=retry_row.latest_decision,
+            )
+        ],
+        skipped=[],
+    )
+
+
+def _retry_pull_requests_by_status(
+    connection: sqlite3.Connection,
+    *,
+    status: str,
+    limit: int,
+    max_attempts: int,
+) -> RetryPullRequestsResult:
+    rows = connection.execute(
+        """
+        WITH latest_decisions AS (
+            SELECT ranked.pr_id, ranked.decision
+            FROM (
+                SELECT
+                    decisions.pr_id,
+                    decisions.decision,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY decisions.pr_id
+                        ORDER BY decisions.created_at DESC, decisions.id DESC
+                    ) AS row_number
+                FROM decisions
+            ) AS ranked
+            WHERE ranked.row_number = 1
+        )
+        SELECT
+            prs.id,
+            prs.github_pr_number,
+            prs.target_branch,
+            analysis_queue.status,
+            analysis_queue.attempts,
+            latest_decisions.decision
+        FROM analysis_queue
+        JOIN prs ON prs.id = analysis_queue.pr_id
+        LEFT JOIN latest_decisions ON latest_decisions.pr_id = prs.id
+        WHERE analysis_queue.status = ?
+        ORDER BY analysis_queue.priority ASC,
+                 prs.merged_at ASC,
+                 analysis_queue.id ASC
+        LIMIT ?
+        """,
+        (status, limit),
+    ).fetchall()
+
+    retry_rows = [_retry_row_from_sql(row) for row in rows]
+    retried = [
+        RetriedPullRequest(
+            pr_id=row.pr_id,
+            github_pr_number=row.github_pr_number,
+            target_branch=row.target_branch,
+            previous_status=row.status,
+            attempts=row.attempts,
+            latest_decision=row.latest_decision,
+        )
+        for row in retry_rows
+        if row.attempts < max_attempts
+    ]
+    skipped = [
+        _skipped_retry_pull_request(row, "max attempts reached")
+        for row in retry_rows
+        if row.attempts >= max_attempts
+    ]
+
+    if retried:
+        _reset_queue_rows_for_retry(connection, [row.pr_id for row in retried])
+
+    return RetryPullRequestsResult(retried=retried, skipped=skipped)
+
+
+@dataclass(frozen=True)
+class _RetryRow:
+    pr_id: int
+    github_pr_number: int
+    target_branch: str
+    status: str
+    attempts: int
+    latest_decision: str | None
+
+
+def _retry_row_from_sql(row: sqlite3.Row | tuple[object, ...]) -> _RetryRow:
+    return _RetryRow(
+        pr_id=int(row[0]),
+        github_pr_number=int(row[1]),
+        target_branch=str(row[2]),
+        status=str(row[3]),
+        attempts=int(row[4]),
+        latest_decision=row[5],
+    )
+
+
+def _pr_retry_skip_reason(row: _RetryRow, *, max_attempts: int) -> str | None:
+    if row.status == QUEUE_STATUS_RUNNING:
+        return "PR is currently CODEX_RUNNING"
+    if row.attempts >= max_attempts:
+        return "max attempts reached"
+    if row.status in {QUEUE_STATUS_NEEDS_RETRY, QUEUE_STATUS_FAILED_INFRA}:
+        return None
+    if row.latest_decision == Decision.INCONCLUSIVE.value:
+        return None
+    return f"status {row.status} is not retryable"
+
+
+def _skipped_retry_pull_request(row: _RetryRow, reason: str) -> SkippedRetryPullRequest:
+    return SkippedRetryPullRequest(
+        pr_id=row.pr_id,
+        github_pr_number=row.github_pr_number,
+        target_branch=row.target_branch,
+        status=row.status,
+        attempts=row.attempts,
+        latest_decision=row.latest_decision,
+        reason=reason,
+    )
+
+
+def _reset_queue_rows_for_retry(
+    connection: sqlite3.Connection,
+    pr_ids: list[int],
+) -> None:
+    now = _utc_now()
+    connection.executemany(
+        """
+        UPDATE analysis_queue
+        SET status = ?,
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = NULL,
+            next_retry_at = NULL,
+            updated_at = ?
+        WHERE pr_id = ?
+        """,
+        [(QUEUE_STATUS_QUEUED, now, pr_id) for pr_id in pr_ids],
     )
 
 

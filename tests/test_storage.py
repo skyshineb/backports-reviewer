@@ -14,6 +14,7 @@ from backport_harness.storage import (
     list_saved_pull_requests,
     queue_status_for_decision,
     recover_stale_runs,
+    retry_pull_requests,
     select_analysis_candidates,
     start_analysis_run,
     store_validated_decision,
@@ -1206,6 +1207,252 @@ def test_recover_stale_runs_rejects_non_positive_timeout(tmp_path: Path) -> None
     with connect(sqlite_path) as connection:
         with pytest.raises(ValueError, match="positive"):
             recover_stale_runs(connection, older_than_seconds=0)
+
+
+def test_retry_pull_requests_by_needs_retry_status_resets_queue_state(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        first_pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Retry first",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="NEEDS_RETRY",
+            priority=20,
+        )
+        second_pr_id = _insert_saved_pr(
+            connection,
+            number=2,
+            title="Retry second",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="NEEDS_RETRY",
+            priority=30,
+        )
+        _insert_saved_pr(
+            connection,
+            number=3,
+            title="Failed infra",
+            branch="master",
+            merged_at="2024-01-03T00:00:00Z",
+            status="FAILED_INFRA",
+            priority=10,
+        )
+        connection.execute(
+            """
+            UPDATE analysis_queue
+            SET attempts = ?,
+                locked_at = ?,
+                locked_by = ?,
+                last_error = ?,
+                next_retry_at = ?
+            WHERE pr_id = ?
+            """,
+            (
+                1,
+                "2024-01-01T01:00:00Z",
+                "worker",
+                "transient failure",
+                "2024-01-02T00:00:00Z",
+                first_pr_id,
+            ),
+        )
+
+        result = retry_pull_requests(
+            connection,
+            status="NEEDS_RETRY",
+            limit=1,
+            max_attempts=2,
+        )
+        rows = connection.execute(
+            """
+            SELECT prs.github_pr_number,
+                   analysis_queue.status,
+                   analysis_queue.attempts,
+                   analysis_queue.locked_at,
+                   analysis_queue.locked_by,
+                   analysis_queue.last_error,
+                   analysis_queue.next_retry_at
+            FROM analysis_queue
+            JOIN prs ON prs.id = analysis_queue.pr_id
+            ORDER BY prs.github_pr_number
+            """
+        ).fetchall()
+
+    assert [row.github_pr_number for row in result.retried] == [1]
+    assert result.skipped == []
+    assert rows[0] == (1, "QUEUED_FOR_ANALYSIS", 1, None, None, None, None)
+    assert rows[1][0:2] == (2, "NEEDS_RETRY")
+    assert rows[2][0:2] == (3, "FAILED_INFRA")
+    assert second_pr_id > first_pr_id
+
+
+def test_retry_pull_requests_by_failed_infra_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Failed infra",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="FAILED_INFRA",
+            priority=20,
+        )
+
+        result = retry_pull_requests(
+            connection,
+            status="FAILED_INFRA",
+            limit=3,
+            max_attempts=2,
+        )
+        row = connection.execute(
+            "SELECT status, attempts FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()
+
+    assert [retried.github_pr_number for retried in result.retried] == [1]
+    assert row == ("QUEUED_FOR_ANALYSIS", 0)
+
+
+def test_retry_pull_request_by_pr_allows_latest_inconclusive(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Inconclusive",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="REPORTABLE",
+            priority=20,
+        )
+        run_id = _insert_analysis_run(connection, pr_id=pr_id, run_id="run-1")
+        decision_id = _insert_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=run_id,
+            decision="INCONCLUSIVE",
+            created_at="2024-01-01T01:00:00Z",
+        )
+        _insert_evidence(connection, decision_id=decision_id)
+        _insert_test_run(connection, analysis_run_id=run_id)
+
+        result = retry_pull_requests(
+            connection,
+            pr_number=12345,
+            max_attempts=2,
+        )
+        queue_row = connection.execute(
+            "SELECT status, attempts FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()
+        history_counts = connection.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM analysis_runs WHERE pr_id = ?),
+                (SELECT COUNT(*) FROM decisions WHERE pr_id = ?),
+                (SELECT COUNT(*) FROM evidence WHERE decision_id = ?),
+                (SELECT COUNT(*) FROM test_runs WHERE analysis_run_id = ?)
+            """,
+            (pr_id, pr_id, decision_id, run_id),
+        ).fetchone()
+
+    assert [retried.github_pr_number for retried in result.retried] == [12345]
+    assert queue_row == ("QUEUED_FOR_ANALYSIS", 0)
+    assert history_counts == (1, 1, 1, 1)
+
+
+def test_retry_pull_requests_rejects_bulk_inconclusive(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        with pytest.raises(ValueError, match="Bulk retry supports only"):
+            retry_pull_requests(
+                connection,
+                status="INCONCLUSIVE",
+                limit=3,
+                max_attempts=2,
+            )
+
+
+def test_retry_pull_requests_skips_max_attempt_rows(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Max attempts",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="NEEDS_RETRY",
+            priority=20,
+        )
+        connection.execute(
+            "UPDATE analysis_queue SET attempts = ? WHERE pr_id = ?",
+            (2, pr_id),
+        )
+
+        result = retry_pull_requests(
+            connection,
+            status="NEEDS_RETRY",
+            limit=3,
+            max_attempts=2,
+        )
+        row = connection.execute(
+            "SELECT status, attempts FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()
+
+    assert result.retried == []
+    assert [skipped.reason for skipped in result.skipped] == ["max attempts reached"]
+    assert row == ("NEEDS_RETRY", 2)
+
+
+def test_retry_pull_request_by_pr_skips_running_rows(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Running",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="CODEX_RUNNING",
+            priority=20,
+        )
+
+        result = retry_pull_requests(
+            connection,
+            pr_number=12345,
+            max_attempts=2,
+        )
+        row = connection.execute(
+            "SELECT status FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()
+
+    assert result.retried == []
+    assert [skipped.reason for skipped in result.skipped] == [
+        "PR is currently CODEX_RUNNING"
+    ]
+    assert row == ("CODEX_RUNNING",)
 
 
 def _valid_codex_result(*, decision: str = "MASTER_FIX_VERIFIED_ON_015"):

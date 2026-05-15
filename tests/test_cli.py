@@ -58,6 +58,7 @@ def test_help_shows_commands() -> None:
     assert "prepare" in result.output
     assert "prepare-bundle" in result.output
     assert "report" in result.output
+    assert "retry" in result.output
     assert "scan" in result.output
     assert "version" in result.output
 
@@ -680,6 +681,175 @@ def test_recover_stale_rejects_invalid_older_than_hours(tmp_path: Path) -> None:
     assert "positive" in result.output
 
 
+def test_retry_by_needs_retry_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, status="NEEDS_RETRY")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "retry",
+            "--status",
+            "NEEDS_RETRY",
+            "--limit",
+            "3",
+        ],
+    )
+
+    with connect(sqlite_path) as connection:
+        row = connection.execute("SELECT status, attempts FROM analysis_queue").fetchone()
+
+    assert result.exit_code == 0
+    assert "Retried 1 PR(s)." in result.output
+    assert row == ("QUEUED_FOR_ANALYSIS", 0)
+
+
+def test_retry_by_failed_infra_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, status="FAILED_INFRA")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "retry",
+            "--status",
+            "FAILED_INFRA",
+            "--limit",
+            "3",
+        ],
+    )
+
+    with connect(sqlite_path) as connection:
+        row = connection.execute("SELECT status FROM analysis_queue").fetchone()
+
+    assert result.exit_code == 0
+    assert "Retried 1 PR(s)." in result.output
+    assert row == ("QUEUED_FOR_ANALYSIS",)
+
+
+def test_retry_by_pr(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, status="NEEDS_RETRY")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "retry",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    with connect(sqlite_path) as connection:
+        row = connection.execute("SELECT status FROM analysis_queue").fetchone()
+
+    assert result.exit_code == 0
+    assert "Retried 1 PR(s)." in result.output
+    assert row == ("QUEUED_FOR_ANALYSIS",)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["retry"],
+        ["retry", "--pr", "12345", "--status", "NEEDS_RETRY"],
+        ["retry", "--pr", "12345", "--limit", "3"],
+    ],
+)
+def test_retry_rejects_invalid_selector_combinations(
+    tmp_path: Path,
+    args: list[str],
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(app, ["--config", str(config_path), *args])
+
+    assert result.exit_code != 0
+    assert "selector" in result.output or "cannot be combined" in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["retry", "--pr", "0"],
+        ["retry", "--status", "NEEDS_RETRY", "--limit", "0"],
+    ],
+)
+def test_retry_rejects_invalid_positive_values(
+    tmp_path: Path,
+    args: list[str],
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(app, ["--config", str(config_path), *args])
+
+    assert result.exit_code != 0
+    assert "positive integer" in result.output
+
+
+def test_retry_rejects_bulk_inconclusive(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "retry",
+            "--status",
+            "INCONCLUSIVE",
+            "--limit",
+            "3",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "INCONCLUSIVE" in result.output
+    assert "--pr" in result.output
+
+
+def test_retry_reports_missing_database(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "retry",
+            "--status",
+            "NEEDS_RETRY",
+            "--limit",
+            "3",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Retried 0 PR(s)." in result.output
+
+
 def test_prepare_command_passes_pr_to_worktree_manager(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -857,6 +1027,8 @@ def _insert_saved_pr(
     with_file: bool = False,
     with_analysis: bool = False,
     with_failed_analysis: bool = False,
+    status: str = "QUEUED_FOR_ANALYSIS",
+    attempts: int = 0,
 ) -> None:
     with connect(sqlite_path) as connection:
         cursor = connection.execute(
@@ -897,9 +1069,9 @@ def _insert_saved_pr(
             """,
             (
                 pr_id,
-                "QUEUED_FOR_ANALYSIS",
+                status,
                 100,
-                0,
+                attempts,
                 "2024-01-01T00:00:00Z",
                 "2024-01-01T00:00:00Z",
             ),
