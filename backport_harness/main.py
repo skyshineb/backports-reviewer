@@ -10,6 +10,7 @@ from backport_harness.analysis_runner import analyze_one_pr
 from backport_harness.commands.analyze import render_analyze_dry_run
 from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
+from backport_harness.commands.recover_stale import render_recover_stale
 from backport_harness.commands.report import write_reports
 from backport_harness.config import DEFAULT_ANALYSIS_LIMIT
 from backport_harness.config import HarnessConfig, load_config
@@ -288,6 +289,33 @@ def report(ctx: typer.Context) -> None:
     typer.echo(f"- {result.inconclusive_path}: {result.inconclusive_count} row(s)")
     typer.echo(f"- {result.discarded_path}: {result.discarded_count} row(s)")
     typer.echo(f"- {result.full_audit_path}: {result.full_audit_count} row(s)")
+
+
+@app.command("recover-stale")
+def recover_stale(
+    ctx: typer.Context,
+    older_than_hours: Optional[float] = typer.Option(
+        None,
+        "--older-than-hours",
+        help="Recover CODEX_RUNNING rows locked longer than this many hours.",
+    ),
+) -> None:
+    """Mark stale Codex analysis runs retryable."""
+    config = _require_config(ctx)
+    if older_than_hours is not None:
+        if older_than_hours <= 0:
+            raise typer.BadParameter("older-than-hours must be positive.")
+        older_than_seconds = int(older_than_hours * 3600)
+    else:
+        older_than_seconds = config.analysis.stale_timeout_seconds
+
+    if older_than_seconds <= 0:
+        raise typer.BadParameter("stale timeout must be positive.")
+
+    render_recover_stale(
+        sqlite_path=config.storage.sqlite_path,
+        older_than_seconds=older_than_seconds,
+    )
 
 
 @db_app.command("init")

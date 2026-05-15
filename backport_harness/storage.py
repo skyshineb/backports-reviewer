@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from importlib import resources
 from pathlib import Path
 
@@ -56,6 +56,16 @@ class AnalysisStart:
     analysis_run_id: int
     run_id: str
     attempts: int
+
+
+@dataclass(frozen=True)
+class RecoveredStaleRun:
+    pr_id: int
+    github_pr_number: int
+    target_branch: str
+    previous_locked_at: str
+    previous_locked_by: str | None
+    last_error: str
 
 
 @dataclass(frozen=True)
@@ -645,6 +655,80 @@ def finish_result_validation(
         """,
         (queue_status, stored_error, now, pr_id),
     )
+
+
+def recover_stale_runs(
+    connection: sqlite3.Connection,
+    *,
+    older_than_seconds: int,
+    now: datetime | None = None,
+) -> list[RecoveredStaleRun]:
+    if older_than_seconds <= 0:
+        raise ValueError("older_than_seconds must be positive.")
+
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    cutoff = current_time - timedelta(seconds=older_than_seconds)
+    cutoff_value = cutoff.isoformat()
+
+    rows = connection.execute(
+        """
+        SELECT
+            analysis_queue.pr_id,
+            prs.github_pr_number,
+            prs.target_branch,
+            analysis_queue.locked_at,
+            analysis_queue.locked_by
+        FROM analysis_queue
+        JOIN prs ON prs.id = analysis_queue.pr_id
+        WHERE analysis_queue.status = ?
+          AND analysis_queue.locked_at IS NOT NULL
+          AND analysis_queue.locked_at < ?
+        ORDER BY analysis_queue.locked_at ASC, analysis_queue.id ASC
+        """,
+        (QUEUE_STATUS_RUNNING, cutoff_value),
+    ).fetchall()
+
+    recovered = [
+        RecoveredStaleRun(
+            pr_id=int(row[0]),
+            github_pr_number=int(row[1]),
+            target_branch=str(row[2]),
+            previous_locked_at=str(row[3]),
+            previous_locked_by=row[4],
+            last_error=(
+                "Recovered stale Codex run after exceeding "
+                f"{older_than_seconds} second stale timeout."
+            ),
+        )
+        for row in rows
+    ]
+    if not recovered:
+        return []
+
+    update_time = current_time.isoformat()
+    connection.executemany(
+        """
+        UPDATE analysis_queue
+        SET status = ?,
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = ?,
+            updated_at = ?
+        WHERE pr_id = ?
+        """,
+        [
+            (
+                QUEUE_STATUS_NEEDS_RETRY,
+                stale_run.last_error,
+                update_time,
+                stale_run.pr_id,
+            )
+            for stale_run in recovered
+        ],
+    )
+    return recovered
 
 
 def store_validated_decision(

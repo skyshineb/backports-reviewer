@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -564,6 +565,121 @@ def test_analyze_rejects_invalid_limit(tmp_path: Path) -> None:
     assert "positive integer" in result.output
 
 
+def test_recover_stale_reports_missing_database(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+
+    result = runner.invoke(app, ["--config", str(config_path), "recover-stale"])
+
+    assert result.exit_code == 0
+    assert "Recovered 0 stale Codex run(s)." in result.output
+
+
+def test_recover_stale_uses_configured_default_timeout(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path)
+    locked_at = datetime.now(timezone.utc) - timedelta(hours=3)
+    _mark_pr_running(sqlite_path, locked_at=locked_at)
+
+    result = runner.invoke(app, ["--config", str(config_path), "recover-stale"])
+
+    with connect(sqlite_path) as connection:
+        queue_row = connection.execute(
+            """
+            SELECT status, locked_at, locked_by, last_error
+            FROM analysis_queue
+            """
+        ).fetchone()
+
+    assert result.exit_code == 0
+    assert "Recovered 1 stale Codex run(s)." in result.output
+    assert queue_row[0:3] == ("NEEDS_RETRY", None, None)
+    assert "7200 second stale timeout" in queue_row[3]
+
+
+def test_recover_stale_older_than_hours_overrides_configured_timeout(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path)
+    locked_at = datetime.now(timezone.utc) - timedelta(minutes=90)
+    _mark_pr_running(sqlite_path, locked_at=locked_at)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "recover-stale",
+            "--older-than-hours",
+            "1",
+        ],
+    )
+
+    with connect(sqlite_path) as connection:
+        queue_row = connection.execute(
+            """
+            SELECT status, locked_at, locked_by, last_error
+            FROM analysis_queue
+            """
+        ).fetchone()
+
+    assert result.exit_code == 0
+    assert "Recovered 1 stale Codex run(s)." in result.output
+    assert queue_row[0:3] == ("NEEDS_RETRY", None, None)
+    assert "3600 second stale timeout" in queue_row[3]
+
+
+def test_recover_stale_keeps_non_stale_rows_running(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path)
+    locked_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+    _mark_pr_running(sqlite_path, locked_at=locked_at)
+
+    result = runner.invoke(app, ["--config", str(config_path), "recover-stale"])
+
+    with connect(sqlite_path) as connection:
+        queue_row = connection.execute(
+            """
+            SELECT status, locked_at, locked_by, last_error
+            FROM analysis_queue
+            """
+        ).fetchone()
+
+    assert result.exit_code == 0
+    assert "Recovered 0 stale Codex run(s)." in result.output
+    assert queue_row == ("CODEX_RUNNING", locked_at.isoformat(), "test-worker", None)
+
+
+def test_recover_stale_rejects_invalid_older_than_hours(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "recover-stale",
+            "--older-than-hours",
+            "0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "positive" in result.output
+
+
 def test_prepare_command_passes_pr_to_worktree_manager(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -832,6 +948,19 @@ def _insert_saved_pr(
                 stdout_log_path="workspace/tasks/pr-12345/output/failed-stdout.log",
             )
             _insert_test_details(connection, analysis_run_id=analysis_run_id)
+
+
+def _mark_pr_running(sqlite_path: Path, *, locked_at: datetime) -> None:
+    with connect(sqlite_path) as connection:
+        connection.execute(
+            """
+            UPDATE analysis_queue
+            SET status = ?,
+                locked_at = ?,
+                locked_by = ?
+            """,
+            ("CODEX_RUNNING", locked_at.isoformat(), "test-worker"),
+        )
 
 
 def _insert_analysis_details(
