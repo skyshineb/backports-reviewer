@@ -1372,7 +1372,7 @@ def _retry_pull_requests_by_status(
     limit: int,
     max_attempts: int,
 ) -> RetryPullRequestsResult:
-    rows = connection.execute(
+    retryable_rows = connection.execute(
         """
         WITH latest_decisions AS (
             SELECT ranked.pr_id, ranked.decision
@@ -1399,15 +1399,52 @@ def _retry_pull_requests_by_status(
         JOIN prs ON prs.id = analysis_queue.pr_id
         LEFT JOIN latest_decisions ON latest_decisions.pr_id = prs.id
         WHERE analysis_queue.status = ?
+          AND analysis_queue.attempts < ?
         ORDER BY analysis_queue.priority ASC,
                  prs.merged_at ASC,
                  analysis_queue.id ASC
         LIMIT ?
         """,
-        (status, limit),
+        (status, max_attempts, limit),
     ).fetchall()
 
-    retry_rows = [_retry_row_from_sql(row) for row in rows]
+    skipped_rows = connection.execute(
+        """
+        WITH latest_decisions AS (
+            SELECT ranked.pr_id, ranked.decision
+            FROM (
+                SELECT
+                    decisions.pr_id,
+                    decisions.decision,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY decisions.pr_id
+                        ORDER BY decisions.created_at DESC, decisions.id DESC
+                    ) AS row_number
+                FROM decisions
+            ) AS ranked
+            WHERE ranked.row_number = 1
+        )
+        SELECT
+            prs.id,
+            prs.github_pr_number,
+            prs.target_branch,
+            analysis_queue.status,
+            analysis_queue.attempts,
+            latest_decisions.decision
+        FROM analysis_queue
+        JOIN prs ON prs.id = analysis_queue.pr_id
+        LEFT JOIN latest_decisions ON latest_decisions.pr_id = prs.id
+        WHERE analysis_queue.status = ?
+          AND analysis_queue.attempts >= ?
+        ORDER BY analysis_queue.priority ASC,
+                 prs.merged_at ASC,
+                 analysis_queue.id ASC
+        LIMIT ?
+        """,
+        (status, max_attempts, limit),
+    ).fetchall()
+
+    retry_rows = [_retry_row_from_sql(row) for row in retryable_rows]
     retried = [
         RetriedPullRequest(
             pr_id=row.pr_id,
@@ -1418,12 +1455,10 @@ def _retry_pull_requests_by_status(
             latest_decision=row.latest_decision,
         )
         for row in retry_rows
-        if row.attempts < max_attempts
     ]
     skipped = [
         _skipped_retry_pull_request(row, "max attempts reached")
-        for row in retry_rows
-        if row.attempts >= max_attempts
+        for row in [_retry_row_from_sql(row) for row in skipped_rows]
     ]
 
     if retried:

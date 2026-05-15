@@ -1423,6 +1423,65 @@ def test_retry_pull_requests_skips_max_attempt_rows(tmp_path: Path) -> None:
     assert row == ("NEEDS_RETRY", 2)
 
 
+def test_retry_pull_requests_limit_counts_retried_rows_not_skipped_rows(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        maxed_pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Maxed first",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="NEEDS_RETRY",
+            priority=10,
+        )
+        eligible_pr_id = _insert_saved_pr(
+            connection,
+            number=2,
+            title="Eligible second",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="NEEDS_RETRY",
+            priority=20,
+        )
+        connection.execute(
+            "UPDATE analysis_queue SET attempts = ? WHERE pr_id = ?",
+            (2, maxed_pr_id),
+        )
+        connection.execute(
+            "UPDATE analysis_queue SET attempts = ? WHERE pr_id = ?",
+            (1, eligible_pr_id),
+        )
+
+        result = retry_pull_requests(
+            connection,
+            status="NEEDS_RETRY",
+            limit=1,
+            max_attempts=2,
+        )
+        rows = connection.execute(
+            """
+            SELECT prs.github_pr_number,
+                   analysis_queue.status,
+                   analysis_queue.attempts
+            FROM analysis_queue
+            JOIN prs ON prs.id = analysis_queue.pr_id
+            ORDER BY prs.github_pr_number
+            """
+        ).fetchall()
+
+    assert [retried.github_pr_number for retried in result.retried] == [2]
+    assert [skipped.github_pr_number for skipped in result.skipped] == [1]
+    assert rows == [
+        (1, "NEEDS_RETRY", 2),
+        (2, "QUEUED_FOR_ANALYSIS", 1),
+    ]
+
+
 def test_retry_pull_request_by_pr_skips_running_rows(tmp_path: Path) -> None:
     sqlite_path = tmp_path / "backport_harness.sqlite3"
     init_database(sqlite_path)
