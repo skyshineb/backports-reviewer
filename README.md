@@ -125,7 +125,7 @@ export GITHUB_TOKEN=...
 ```
 
 - `prepare` clones the configured public upstream repository if needed.
-- It fetches configured upstream branches and creates a clean detached `origin/0.15` worktree.
+- It fetches configured upstream branches and creates a clean detached `origin/release-0.15.0` worktree.
 - The default worktree path is `workspace/worktrees/pr-12345-015/`.
 - It rejects configured private path overlaps and remote URL mismatches.
 - It does not invoke Codex, create task bundles, or modify SQLite.

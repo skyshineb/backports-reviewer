@@ -30,8 +30,25 @@ def test_ensure_upstream_repo_clones_when_repo_missing(tmp_path: Path, monkeypat
     ensure_upstream_repo(config)
 
     assert calls == [
-        ["git", "clone", config.local_repo.upstream_url, str(config.local_repo.repo_dir)],
-        ["git", "-C", str(config.local_repo.repo_dir), "fetch", "origin", "master", "0.15", "--prune"],
+        [
+            "git",
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            config.local_repo.upstream_url,
+            str(config.local_repo.repo_dir),
+        ],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "fetch",
+            "--filter=blob:none",
+            "origin",
+            "master",
+            "release-0.15.0",
+            "--prune",
+        ],
     ]
 
 
@@ -54,7 +71,17 @@ def test_ensure_upstream_repo_checks_remote_and_fetches_existing_repo(
 
     assert calls == [
         ["git", "-C", str(config.local_repo.repo_dir), "remote", "get-url", "origin"],
-        ["git", "-C", str(config.local_repo.repo_dir), "fetch", "origin", "master", "0.15", "--prune"],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "fetch",
+            "--filter=blob:none",
+            "origin",
+            "master",
+            "release-0.15.0",
+            "--prune",
+        ],
     ]
 
 

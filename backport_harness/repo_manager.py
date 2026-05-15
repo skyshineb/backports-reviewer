@@ -11,6 +11,11 @@ class RepositoryError(RuntimeError):
     pass
 
 
+BRANCH_ALIASES = {
+    "0.15": "release-0.15.0",
+}
+
+
 def ensure_upstream_repo(config: HarnessConfig) -> Path:
     repo_dir = config.local_repo.repo_dir
     validate_public_path(repo_dir, config.security.forbidden_private_prefixes)
@@ -18,7 +23,16 @@ def ensure_upstream_repo(config: HarnessConfig) -> Path:
 
     if not repo_dir.exists():
         repo_dir.parent.mkdir(parents=True, exist_ok=True)
-        run_git(["git", "clone", config.local_repo.upstream_url, str(repo_dir)])
+        run_git(
+            [
+                "git",
+                "clone",
+                "--filter=blob:none",
+                "--no-checkout",
+                config.local_repo.upstream_url,
+                str(repo_dir),
+            ]
+        )
     else:
         _verify_existing_repo_remote(repo_dir, config.local_repo.upstream_url)
 
@@ -40,4 +54,20 @@ def _verify_existing_repo_remote(repo_dir: Path, expected_url: str) -> None:
 
 
 def _fetch_configured_branches(repo_dir: Path, branches: list[str]) -> None:
-    run_git(["git", "-C", str(repo_dir), "fetch", "origin", *branches, "--prune"])
+    remote_branches = [_remote_branch_name(branch) for branch in branches]
+    run_git(
+        [
+            "git",
+            "-C",
+            str(repo_dir),
+            "fetch",
+            "--filter=blob:none",
+            "origin",
+            *remote_branches,
+            "--prune",
+        ]
+    )
+
+
+def _remote_branch_name(branch: str) -> str:
+    return BRANCH_ALIASES.get(branch, branch)
