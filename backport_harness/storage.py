@@ -6,11 +6,14 @@ from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
 
+from backport_harness.codex_result import CodexResult, Decision
 from backport_harness.github_client import GitHubChangedFile, GitHubPullRequest
 from backport_harness.state_machine import (
+    QUEUE_STATUS_DONE,
     QUEUE_STATUS_FAILED_INFRA,
     QUEUE_STATUS_NEEDS_RETRY,
     QUEUE_STATUS_QUEUED,
+    QUEUE_STATUS_REPORTABLE,
     QUEUE_STATUS_RUNNING,
     QUEUE_STATUS_VALIDATED,
     RETRYABLE_QUEUE_STATUSES,
@@ -595,6 +598,123 @@ def finish_result_validation(
     )
 
 
+def store_validated_decision(
+    connection: sqlite3.Connection,
+    *,
+    pr_id: int,
+    analysis_run_id: int,
+    result: CodexResult,
+) -> int:
+    now = _utc_now()
+    queue_status = queue_status_for_decision(result.decision)
+
+    cursor = connection.execute(
+        """
+        INSERT INTO decisions(
+            pr_id,
+            analysis_run_id,
+            decision,
+            confidence,
+            bugfix_classification,
+            applies_to_oss_015,
+            reason,
+            human_action,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            analysis_run_id,
+            result.decision.value,
+            result.confidence.value,
+            result.bugfix_classification,
+            _optional_bool_to_int(result.applicability.applies_to_oss_015),
+            result.applicability.reason,
+            result.human_action,
+            now,
+        ),
+    )
+    decision_id = int(cursor.lastrowid)
+
+    connection.executemany(
+        """
+        INSERT INTO evidence(
+            decision_id,
+            evidence_type,
+            description,
+            file_path,
+            command,
+            exit_code,
+            log_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                decision_id,
+                evidence.type.value,
+                evidence.description,
+                evidence.path,
+                evidence.command,
+                evidence.exit_code,
+                evidence.log_path,
+            )
+            for evidence in result.evidence
+        ],
+    )
+
+    test_run_rows = _test_run_rows_for_result(
+        analysis_run_id=analysis_run_id,
+        result=result,
+    )
+    if test_run_rows:
+        connection.executemany(
+            """
+            INSERT INTO test_runs(
+                analysis_run_id,
+                phase,
+                command,
+                exit_code,
+                result,
+                log_path,
+                started_at,
+                finished_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            test_run_rows,
+        )
+
+    connection.execute(
+        """
+        UPDATE analysis_queue
+        SET status = ?,
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = NULL,
+            updated_at = ?
+        WHERE pr_id = ?
+        """,
+        (queue_status, now, pr_id),
+    )
+    return decision_id
+
+
+def queue_status_for_decision(decision: Decision) -> str:
+    if decision is Decision.FAILED_INFRA:
+        return QUEUE_STATUS_FAILED_INFRA
+    if decision in {
+        Decision.MASTER_NOT_APPLICABLE,
+        Decision.DISCARDED_NON_BUGFIX,
+        Decision.DISCARDED_DOCS_ONLY,
+        Decision.DISCARDED_CI_ONLY,
+        Decision.DISCARDED_RELEASE_ONLY,
+    }:
+        return QUEUE_STATUS_DONE
+    return QUEUE_STATUS_REPORTABLE
+
+
 def list_saved_pull_requests(
     connection: sqlite3.Connection,
     *,
@@ -851,6 +971,84 @@ def _load_migrations() -> list[tuple[str, str]]:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _optional_bool_to_int(value: bool | None) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _test_run_rows_for_result(
+    *,
+    analysis_run_id: int,
+    result: CodexResult,
+) -> list[tuple[int, str, str | None, int | None, str, str | None, None, None]]:
+    rows: list[tuple[int, str, str | None, int | None, str, str | None, None, None]] = []
+
+    if _should_store_test_run(
+        attempted=result.test_before_fix.attempted,
+        command=result.test_before_fix.command,
+        exit_code=result.test_before_fix.exit_code,
+        result_value=result.test_before_fix.result.value
+        if result.test_before_fix.result is not None
+        else None,
+        log_path=result.test_before_fix.log_path,
+    ):
+        rows.append(
+            (
+                analysis_run_id,
+                "test_before_fix",
+                result.test_before_fix.command,
+                result.test_before_fix.exit_code,
+                result.test_before_fix.result.value
+                if result.test_before_fix.result is not None
+                else "not_run",
+                result.test_before_fix.log_path,
+                None,
+                None,
+            )
+        )
+
+    if _should_store_test_run(
+        attempted=result.fix_verification.attempted,
+        command=result.fix_verification.command,
+        exit_code=result.fix_verification.exit_code,
+        result_value=result.fix_verification.result.value
+        if result.fix_verification.result is not None
+        else None,
+        log_path=result.fix_verification.log_path,
+    ):
+        rows.append(
+            (
+                analysis_run_id,
+                "fix_verification",
+                result.fix_verification.command,
+                result.fix_verification.exit_code,
+                result.fix_verification.result.value
+                if result.fix_verification.result is not None
+                else "not_run",
+                result.fix_verification.log_path,
+                None,
+                None,
+            )
+        )
+
+    return rows
+
+
+def _should_store_test_run(
+    *,
+    attempted: bool,
+    command: str | None,
+    exit_code: int | None,
+    result_value: str | None,
+    log_path: str | None,
+) -> bool:
+    meaningful_result = result_value is not None and result_value != "not_run"
+    return attempted or any(
+        value is not None for value in (command, exit_code, log_path)
+    ) or meaningful_result
 
 
 @dataclass(frozen=True)

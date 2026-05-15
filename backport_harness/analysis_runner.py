@@ -12,6 +12,7 @@ from backport_harness.storage import (
     finish_analysis_run,
     finish_result_validation,
     start_analysis_run,
+    store_validated_decision,
 )
 from backport_harness.task_builder import build_task_bundle, resolve_task_dir
 
@@ -116,6 +117,13 @@ def analyze_one_pr(
                 max_attempts=config.codex.max_attempts_per_pr,
                 last_error=None if validation.valid else validation.summary,
             )
+            if validation.valid and validation.result is not None:
+                store_validated_decision(
+                    connection,
+                    pr_id=analysis_start.pr_id,
+                    analysis_run_id=analysis_start.analysis_run_id,
+                    result=validation.result,
+                )
         if not validation.valid:
             raise RuntimeError(f"Codex result failed validation: {validation.summary}")
 
