@@ -159,6 +159,55 @@ class InspectedPullRequest:
     human_review: InspectedHumanReview | None
 
 
+@dataclass(frozen=True)
+class ReportEvidence:
+    evidence_type: str
+    description: str
+    file_path: str | None
+    command: str | None
+    exit_code: int | None
+    log_path: str | None
+
+
+@dataclass(frozen=True)
+class ReportDecision:
+    id: int
+    analysis_run_id: int
+    run_id: str | None
+    decision: str
+    confidence: str
+    bugfix_classification: str | None
+    applies_to_oss_015: bool | None
+    reason: str
+    human_action: str | None
+    created_at: str
+    evidence: list[ReportEvidence]
+
+
+@dataclass(frozen=True)
+class ReportHumanReview:
+    status: str
+    reviewer: str | None
+    comment: str | None
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ReportPullRequest:
+    id: int
+    github_pr_number: int
+    github_pr_url: str
+    title: str
+    target_branch: str
+    merged_at: str
+    queue_status: str | None
+    priority: int | None
+    attempts: int | None
+    latest_decision: ReportDecision | None
+    decisions: list[ReportDecision]
+    human_review: ReportHumanReview | None
+
+
 def connect(sqlite_path: Path) -> sqlite3.Connection:
     """Open a SQLite connection with project-required pragmas enabled."""
     connection = sqlite3.connect(sqlite_path)
@@ -905,6 +954,151 @@ def get_pull_request_inspection(
     )
 
 
+def get_report_pull_requests(connection: sqlite3.Connection) -> list[ReportPullRequest]:
+    rows = connection.execute(
+        """
+        WITH latest_human_reviews AS (
+            SELECT ranked.pr_id,
+                   ranked.status,
+                   ranked.reviewer,
+                   ranked.comment,
+                   ranked.updated_at
+            FROM (
+                SELECT
+                    human_reviews.pr_id,
+                    human_reviews.status,
+                    human_reviews.reviewer,
+                    human_reviews.comment,
+                    human_reviews.updated_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY human_reviews.pr_id
+                        ORDER BY human_reviews.updated_at DESC, human_reviews.id DESC
+                    ) AS row_number
+                FROM human_reviews
+            ) AS ranked
+            WHERE ranked.row_number = 1
+        )
+        SELECT
+            prs.id,
+            prs.github_pr_number,
+            prs.github_pr_url,
+            prs.title,
+            prs.target_branch,
+            prs.merged_at,
+            analysis_queue.status,
+            analysis_queue.priority,
+            analysis_queue.attempts,
+            latest_human_reviews.status,
+            latest_human_reviews.reviewer,
+            latest_human_reviews.comment,
+            latest_human_reviews.updated_at
+        FROM prs
+        LEFT JOIN analysis_queue ON analysis_queue.pr_id = prs.id
+        LEFT JOIN latest_human_reviews ON latest_human_reviews.pr_id = prs.id
+        ORDER BY prs.target_branch ASC, prs.merged_at ASC, prs.github_pr_number ASC
+        """
+    ).fetchall()
+
+    return [
+        ReportPullRequest(
+            id=int(row[0]),
+            github_pr_number=int(row[1]),
+            github_pr_url=str(row[2]),
+            title=str(row[3]),
+            target_branch=str(row[4]),
+            merged_at=str(row[5]),
+            queue_status=row[6],
+            priority=row[7],
+            attempts=row[8],
+            latest_decision=None,
+            decisions=[],
+            human_review=ReportHumanReview(
+                status=str(row[9]),
+                reviewer=row[10],
+                comment=row[11],
+                updated_at=str(row[12]),
+            )
+            if row[9] is not None
+            else None,
+        )
+        for row in rows
+    ]
+
+
+def get_report_decisions_by_pr(
+    connection: sqlite3.Connection,
+) -> dict[int, list[ReportDecision]]:
+    rows = connection.execute(
+        """
+        SELECT
+            decisions.id,
+            decisions.pr_id,
+            decisions.analysis_run_id,
+            analysis_runs.run_id,
+            decisions.decision,
+            decisions.confidence,
+            decisions.bugfix_classification,
+            decisions.applies_to_oss_015,
+            decisions.reason,
+            decisions.human_action,
+            decisions.created_at
+        FROM decisions
+        LEFT JOIN analysis_runs ON analysis_runs.id = decisions.analysis_run_id
+        ORDER BY decisions.pr_id ASC, decisions.created_at ASC, decisions.id ASC
+        """
+    ).fetchall()
+
+    evidence_by_decision = _get_report_evidence_by_decision(connection)
+    decisions_by_pr: dict[int, list[ReportDecision]] = {}
+    for row in rows:
+        applies_to_oss_015 = None
+        if row[7] is not None:
+            applies_to_oss_015 = bool(row[7])
+
+        pr_id = int(row[1])
+        decision = ReportDecision(
+            id=int(row[0]),
+            analysis_run_id=int(row[2]),
+            run_id=row[3],
+            decision=str(row[4]),
+            confidence=str(row[5]),
+            bugfix_classification=row[6],
+            applies_to_oss_015=applies_to_oss_015,
+            reason=str(row[8]),
+            human_action=row[9],
+            created_at=str(row[10]),
+            evidence=evidence_by_decision.get(int(row[0]), []),
+        )
+        decisions_by_pr.setdefault(pr_id, []).append(decision)
+
+    return decisions_by_pr
+
+
+def get_report_data(connection: sqlite3.Connection) -> list[ReportPullRequest]:
+    decisions_by_pr = get_report_decisions_by_pr(connection)
+    rows = []
+    for pull_request in get_report_pull_requests(connection):
+        decisions = decisions_by_pr.get(pull_request.id, [])
+        latest_decision = decisions[-1] if decisions else None
+        rows.append(
+            ReportPullRequest(
+                id=pull_request.id,
+                github_pr_number=pull_request.github_pr_number,
+                github_pr_url=pull_request.github_pr_url,
+                title=pull_request.title,
+                target_branch=pull_request.target_branch,
+                merged_at=pull_request.merged_at,
+                queue_status=pull_request.queue_status,
+                priority=pull_request.priority,
+                attempts=pull_request.attempts,
+                latest_decision=latest_decision,
+                decisions=decisions,
+                human_review=pull_request.human_review,
+            )
+        )
+    return rows
+
+
 def is_test_file(filename: str) -> bool:
     normalized = filename.lower()
     name = Path(normalized).name
@@ -1300,3 +1494,36 @@ def _get_latest_human_review(
         comment=row[2],
         updated_at=str(row[3]),
     )
+
+
+def _get_report_evidence_by_decision(
+    connection: sqlite3.Connection,
+) -> dict[int, list[ReportEvidence]]:
+    rows = connection.execute(
+        """
+        SELECT
+            decision_id,
+            evidence_type,
+            description,
+            file_path,
+            command,
+            exit_code,
+            log_path
+        FROM evidence
+        ORDER BY decision_id ASC, id ASC
+        """
+    ).fetchall()
+
+    evidence_by_decision: dict[int, list[ReportEvidence]] = {}
+    for row in rows:
+        evidence_by_decision.setdefault(int(row[0]), []).append(
+            ReportEvidence(
+                evidence_type=str(row[1]),
+                description=str(row[2]),
+                file_path=row[3],
+                command=row[4],
+                exit_code=row[5],
+                log_path=row[6],
+            )
+        )
+    return evidence_by_decision

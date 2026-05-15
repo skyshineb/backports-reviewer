@@ -10,6 +10,7 @@ from backport_harness.analysis_runner import analyze_one_pr
 from backport_harness.commands.analyze import render_analyze_dry_run
 from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
+from backport_harness.commands.report import write_reports
 from backport_harness.config import DEFAULT_ANALYSIS_LIMIT
 from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
@@ -268,6 +269,25 @@ def prepare_bundle(
         raise typer.BadParameter(str(error)) from error
 
     typer.echo(f"Prepared task bundle at {bundle.task_dir}")
+
+
+@app.command("report")
+def report(ctx: typer.Context) -> None:
+    """Generate review reports from the local SQLite database."""
+    config = _require_config(ctx)
+    result = write_reports(
+        sqlite_path=config.storage.sqlite_path,
+        output_dir=config.reports.output_dir,
+    )
+
+    typer.echo(f"Generated reports in {result.output_dir}")
+    typer.echo(
+        f"- {result.backport_candidates_path}: "
+        f"{result.backport_candidates_count} row(s)"
+    )
+    typer.echo(f"- {result.inconclusive_path}: {result.inconclusive_count} row(s)")
+    typer.echo(f"- {result.discarded_path}: {result.discarded_count} row(s)")
+    typer.echo(f"- {result.full_audit_path}: {result.full_audit_count} row(s)")
 
 
 @db_app.command("init")
