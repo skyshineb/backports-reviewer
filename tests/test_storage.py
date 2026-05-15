@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from backport_harness.storage import (
     init_database,
     list_saved_pull_requests,
     queue_status_for_decision,
+    recover_stale_runs,
     select_analysis_candidates,
     start_analysis_run,
     store_validated_decision,
@@ -1041,6 +1043,169 @@ def test_store_validated_decision_preserves_previous_decisions(
 )
 def test_queue_status_for_decision(decision: Decision, queue_status: str) -> None:
     assert queue_status_for_decision(decision) == queue_status
+
+
+def test_recover_stale_runs_marks_old_running_rows_retryable(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+    now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+
+    with connect(sqlite_path) as connection:
+        stale_pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Stale",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="CODEX_RUNNING",
+            priority=20,
+        )
+        fresh_pr_id = _insert_saved_pr(
+            connection,
+            number=2,
+            title="Fresh",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="CODEX_RUNNING",
+            priority=20,
+        )
+        done_pr_id = _insert_saved_pr(
+            connection,
+            number=3,
+            title="Done",
+            branch="master",
+            merged_at="2024-01-03T00:00:00Z",
+            status="DONE",
+            priority=20,
+        )
+        stale_run_id = _insert_analysis_run(
+            connection,
+            pr_id=stale_pr_id,
+            run_id="stale-run",
+            stdout_log_path="workspace/tasks/pr-1/output/stdout.log",
+        )
+        connection.execute(
+            "UPDATE analysis_runs SET status = ? WHERE id = ?",
+            ("RUNNING", stale_run_id),
+        )
+        connection.execute(
+            """
+            UPDATE analysis_queue
+            SET locked_at = ?, locked_by = ?
+            WHERE pr_id = ?
+            """,
+            ("2024-01-01T09:59:59+00:00", "old-worker", stale_pr_id),
+        )
+        connection.execute(
+            """
+            UPDATE analysis_queue
+            SET locked_at = ?, locked_by = ?
+            WHERE pr_id = ?
+            """,
+            ("2024-01-01T10:30:00+00:00", "fresh-worker", fresh_pr_id),
+        )
+        connection.execute(
+            """
+            UPDATE analysis_queue
+            SET locked_at = ?, locked_by = ?
+            WHERE pr_id = ?
+            """,
+            ("2024-01-01T09:00:00+00:00", "done-worker", done_pr_id),
+        )
+
+        recovered = recover_stale_runs(
+            connection,
+            older_than_seconds=7200,
+            now=now,
+        )
+        queue_rows = connection.execute(
+            """
+            SELECT prs.github_pr_number,
+                   analysis_queue.status,
+                   analysis_queue.locked_at,
+                   analysis_queue.locked_by,
+                   analysis_queue.last_error
+            FROM analysis_queue
+            JOIN prs ON prs.id = analysis_queue.pr_id
+            ORDER BY prs.github_pr_number
+            """
+        ).fetchall()
+        run_row = connection.execute(
+            """
+            SELECT status, stdout_log_path
+            FROM analysis_runs
+            WHERE id = ?
+            """,
+            (stale_run_id,),
+        ).fetchone()
+
+    assert [row.github_pr_number for row in recovered] == [1]
+    assert recovered[0].previous_locked_at == "2024-01-01T09:59:59+00:00"
+    assert recovered[0].previous_locked_by == "old-worker"
+    assert queue_rows[0][:4] == (1, "NEEDS_RETRY", None, None)
+    assert "7200 second stale timeout" in queue_rows[0][4]
+    assert queue_rows[1] == (
+        2,
+        "CODEX_RUNNING",
+        "2024-01-01T10:30:00+00:00",
+        "fresh-worker",
+        None,
+    )
+    assert queue_rows[2] == (
+        3,
+        "DONE",
+        "2024-01-01T09:00:00+00:00",
+        "done-worker",
+        None,
+    )
+    assert run_row == ("RUNNING", "workspace/tasks/pr-1/output/stdout.log")
+
+
+def test_recover_stale_runs_ignores_running_rows_without_lock_time(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+    now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Running without lock",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="CODEX_RUNNING",
+            priority=20,
+        )
+
+        recovered = recover_stale_runs(
+            connection,
+            older_than_seconds=7200,
+            now=now,
+        )
+        queue_row = connection.execute(
+            """
+            SELECT status, locked_at, locked_by, last_error
+            FROM analysis_queue
+            WHERE pr_id = ?
+            """,
+            (pr_id,),
+        ).fetchone()
+
+    assert recovered == []
+    assert queue_row == ("CODEX_RUNNING", None, None, None)
+
+
+def test_recover_stale_runs_rejects_non_positive_timeout(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        with pytest.raises(ValueError, match="positive"):
+            recover_stale_runs(connection, older_than_seconds=0)
 
 
 def _valid_codex_result(*, decision: str = "MASTER_FIX_VERIFIED_ON_015"):
