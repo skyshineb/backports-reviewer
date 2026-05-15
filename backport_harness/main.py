@@ -12,6 +12,7 @@ from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
 from backport_harness.commands.recover_stale import render_recover_stale
 from backport_harness.commands.report import write_reports
+from backport_harness.commands.review import render_review
 from backport_harness.commands.retry import render_retry
 from backport_harness.config import DEFAULT_ANALYSIS_LIMIT
 from backport_harness.config import HarnessConfig, load_config
@@ -21,7 +22,7 @@ from backport_harness.state_machine import (
     QUEUE_STATUS_FAILED_INFRA,
     QUEUE_STATUS_NEEDS_RETRY,
 )
-from backport_harness.storage import init_database
+from backport_harness.storage import HUMAN_REVIEW_STATUSES, init_database
 from backport_harness.task_builder import build_task_bundle
 from backport_harness.worktree_manager import prepare_oss_015_worktree
 
@@ -294,6 +295,43 @@ def report(ctx: typer.Context) -> None:
     typer.echo(f"- {result.inconclusive_path}: {result.inconclusive_count} row(s)")
     typer.echo(f"- {result.discarded_path}: {result.discarded_count} row(s)")
     typer.echo(f"- {result.full_audit_path}: {result.full_audit_count} row(s)")
+
+
+@app.command("review")
+def review(
+    ctx: typer.Context,
+    pr: int = typer.Option(
+        ...,
+        "--pr",
+        help="GitHub PR number to mark with a human review status.",
+    ),
+    status: str = typer.Option(
+        ...,
+        "--status",
+        help="Human review status to record.",
+    ),
+    comment: Optional[str] = typer.Option(
+        None,
+        "--comment",
+        help="Optional human review comment.",
+    ),
+) -> None:
+    """Record a human review status for one saved PR."""
+    if pr < 1:
+        raise typer.BadParameter("pr must be a positive integer.")
+    if status not in HUMAN_REVIEW_STATUSES:
+        allowed = ", ".join(sorted(HUMAN_REVIEW_STATUSES))
+        raise typer.BadParameter(f"status must be one of: {allowed}.")
+
+    try:
+        render_review(
+            sqlite_path=_resolve_sqlite_path(ctx),
+            pr_number=pr,
+            status=status,
+            comment=comment,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
 
 
 @app.command("recover-stale")

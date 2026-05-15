@@ -58,6 +58,7 @@ def test_help_shows_commands() -> None:
     assert "prepare" in result.output
     assert "prepare-bundle" in result.output
     assert "report" in result.output
+    assert "review" in result.output
     assert "retry" in result.output
     assert "scan" in result.output
     assert "version" in result.output
@@ -408,6 +409,154 @@ def test_report_writes_configured_report_directory_for_missing_database(
     assert (tmp_path / "reports" / "discarded.jsonl").is_file()
     assert (tmp_path / "reports" / "full-audit.jsonl").is_file()
     assert "Generated reports" in result.output
+
+
+def test_review_records_status_and_comment_for_saved_pr(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "review",
+            "--pr",
+            "12345",
+            "--status",
+            "accepted_for_backport",
+            "--comment",
+            "Relevant to private fork",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Recorded human review for #12345: accepted_for_backport" in result.output
+    with connect(sqlite_path) as connection:
+        row = connection.execute(
+            """
+            SELECT status, reviewer, comment
+            FROM human_reviews
+            """
+        ).fetchone()
+
+    assert row == ("accepted_for_backport", None, "Relevant to private fork")
+
+
+def test_review_rejects_invalid_pr_number(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "review",
+            "--pr",
+            "0",
+            "--status",
+            "rejected",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "pr must be a positive integer" in result.output
+
+
+def test_review_rejects_invalid_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "review",
+            "--pr",
+            "12345",
+            "--status",
+            "needs_review",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "status must be one of" in result.output
+
+
+def test_review_rejects_missing_pr(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "review",
+            "--pr",
+            "12345",
+            "--status",
+            "rejected",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "No saved PR found for #12345" in result.output
+
+
+def test_review_status_appears_in_inspect_and_report(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, with_analysis=True, status="REPORTABLE")
+
+    review_result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "review",
+            "--pr",
+            "12345",
+            "--status",
+            "backported",
+            "--comment",
+            "Applied internally",
+        ],
+    )
+    inspect_result = runner.invoke(
+        app,
+        ["--config", str(config_path), "inspect", "--pr", "12345"],
+    )
+    report_result = runner.invoke(app, ["--config", str(config_path), "report"])
+
+    assert review_result.exit_code == 0
+    assert inspect_result.exit_code == 0
+    assert "backported" in inspect_result.output
+    assert "Applied internally" in inspect_result.output
+    assert "Reviewer" in inspect_result.output
+    assert report_result.exit_code == 0
+
+    discarded = (tmp_path / "reports" / "discarded.jsonl").read_text(
+        encoding="utf-8",
+    )
+    audit = (tmp_path / "reports" / "full-audit.jsonl").read_text(
+        encoding="utf-8",
+    )
+    assert '"status": "backported"' in discarded
+    assert '"status": "backported"' in audit
+    assert '"reviewer": null' in audit
 
 
 def test_analyze_dry_run_reports_empty_database(tmp_path: Path) -> None:
