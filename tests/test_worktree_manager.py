@@ -38,7 +38,7 @@ def test_prepare_oss_015_worktree_creates_detached_worktree(
             "add",
             "--detach",
             str(target),
-            "origin/0.15",
+            "origin/release-0.15.0",
         ]
     ]
 

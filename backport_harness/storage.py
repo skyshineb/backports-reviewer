@@ -8,7 +8,10 @@ from pathlib import Path
 
 from backport_harness.github_client import GitHubChangedFile, GitHubPullRequest
 from backport_harness.state_machine import (
+    QUEUE_STATUS_FAILED_INFRA,
+    QUEUE_STATUS_NEEDS_RETRY,
     QUEUE_STATUS_QUEUED,
+    QUEUE_STATUS_RUNNING,
     RETRYABLE_QUEUE_STATUSES,
     assign_initial_priority,
 )
@@ -41,6 +44,14 @@ class AnalysisCandidate:
     priority: int
     attempts: int
     latest_decision: str | None
+
+
+@dataclass(frozen=True)
+class AnalysisStart:
+    pr_id: int
+    analysis_run_id: int
+    run_id: str
+    attempts: int
 
 
 @dataclass(frozen=True)
@@ -401,6 +412,140 @@ def select_analysis_candidates(
         )
         for row in cursor.fetchall()
     ]
+
+
+def start_analysis_run(
+    connection: sqlite3.Connection,
+    *,
+    pr_number: int,
+    run_id: str,
+    task_dir: Path,
+    locked_by: str,
+) -> AnalysisStart:
+    now = _utc_now()
+    row = connection.execute(
+        """
+        SELECT prs.id, analysis_queue.status, analysis_queue.attempts
+        FROM prs
+        JOIN analysis_queue ON analysis_queue.pr_id = prs.id
+        WHERE prs.github_pr_number = ?
+        ORDER BY prs.target_branch ASC
+        LIMIT 1
+        """,
+        (pr_number,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"No queued saved PR found for #{pr_number}.")
+
+    pr_id = int(row[0])
+    status = str(row[1])
+    attempts = int(row[2]) + 1
+    if status not in RETRYABLE_QUEUE_STATUSES:
+        raise ValueError(f"PR #{pr_number} is not retryable from status {status}.")
+
+    connection.execute(
+        """
+        UPDATE analysis_queue
+        SET status = ?,
+            attempts = ?,
+            locked_at = ?,
+            locked_by = ?,
+            last_error = NULL,
+            updated_at = ?
+        WHERE pr_id = ?
+        """,
+        (QUEUE_STATUS_RUNNING, attempts, now, locked_by, now, pr_id),
+    )
+    cursor = connection.execute(
+        """
+        INSERT INTO analysis_runs(
+            pr_id,
+            run_id,
+            started_at,
+            status,
+            task_dir
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (pr_id, run_id, now, "RUNNING", str(task_dir)),
+    )
+    return AnalysisStart(
+        pr_id=pr_id,
+        analysis_run_id=int(cursor.lastrowid),
+        run_id=run_id,
+        attempts=attempts,
+    )
+
+
+def finish_analysis_run(
+    connection: sqlite3.Connection,
+    *,
+    pr_id: int,
+    analysis_run_id: int,
+    codex_exit_code: int | None,
+    timed_out: bool,
+    result_json_path: Path,
+    notes_path: Path | None,
+    stdout_log_path: Path,
+    stderr_log_path: Path,
+    attempts: int,
+    max_attempts: int,
+    last_error: str | None = None,
+) -> None:
+    now = _utc_now()
+    if timed_out:
+        run_status = "TIMEOUT"
+    elif codex_exit_code == 0:
+        run_status = "CODEX_EXITED"
+    else:
+        run_status = "FAILED_INFRA"
+
+    connection.execute(
+        """
+        UPDATE analysis_runs
+        SET finished_at = ?,
+            codex_exit_code = ?,
+            status = ?,
+            result_json_path = ?,
+            notes_path = ?,
+            stdout_log_path = ?,
+            stderr_log_path = ?
+        WHERE id = ?
+        """,
+        (
+            now,
+            codex_exit_code,
+            run_status,
+            str(result_json_path),
+            str(notes_path) if notes_path is not None else None,
+            str(stdout_log_path),
+            str(stderr_log_path),
+            analysis_run_id,
+        ),
+    )
+
+    if codex_exit_code == 0 and not timed_out:
+        return
+
+    queue_status = (
+        QUEUE_STATUS_NEEDS_RETRY if attempts < max_attempts else QUEUE_STATUS_FAILED_INFRA
+    )
+    if last_error is None:
+        last_error = (
+            "Codex timed out." if timed_out else f"Codex exited with {codex_exit_code}."
+        )
+    connection.execute(
+        """
+        UPDATE analysis_queue
+        SET status = ?,
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = ?,
+            updated_at = ?
+        WHERE pr_id = ?
+        """,
+        (queue_status, last_error, now, pr_id),
+    )
 
 
 def list_saved_pull_requests(

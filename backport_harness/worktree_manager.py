@@ -14,7 +14,7 @@ from backport_harness.security import (
 )
 
 
-OSS_015_REF = "origin/0.15"
+OSS_015_REF = "origin/release-0.15.0"
 
 
 def prepare_oss_015_worktree(config: HarnessConfig, *, pr_number: int) -> Path:

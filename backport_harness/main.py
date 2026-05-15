@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from backport_harness import __version__
+from backport_harness.analysis_runner import analyze_one_pr
 from backport_harness.commands.analyze import render_analyze_dry_run
 from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
@@ -172,6 +173,11 @@ def inspect(
 @app.command("analyze")
 def analyze(
     ctx: typer.Context,
+    pr: Optional[int] = typer.Option(
+        None,
+        "--pr",
+        help="GitHub PR number to analyze with Codex.",
+    ),
     limit: Optional[int] = typer.Option(
         None,
         "--limit",
@@ -184,8 +190,27 @@ def analyze(
     ),
 ) -> None:
     """Plan analysis candidates from the local SQLite queue."""
+    if pr is not None and pr < 1:
+        raise typer.BadParameter("pr must be a positive integer.")
+    if pr is not None and dry_run:
+        raise typer.BadParameter("--pr cannot be combined with --dry-run.")
+
+    if pr is not None:
+        config = _require_config(ctx)
+        try:
+            result = analyze_one_pr(config=config, pr_number=pr)
+        except (RuntimeError, ValueError) as error:
+            raise typer.BadParameter(str(error)) from error
+
+        typer.echo(
+            f"Analyzed PR #{pr} in run {result.run_id}; "
+            f"exit={result.codex_result.exit_code}, "
+            f"timed_out={result.codex_result.timed_out}."
+        )
+        return
+
     if not dry_run:
-        raise typer.BadParameter("Codex analysis is not implemented yet; use --dry-run.")
+        raise typer.BadParameter("Use --dry-run or --pr.")
 
     resolved_limit = _resolve_analysis_limit(ctx) if limit is None else limit
     if resolved_limit < 1:
@@ -272,7 +297,7 @@ def _resolve_analysis_limit(ctx: typer.Context) -> int:
 def _require_config(ctx: typer.Context) -> HarnessConfig:
     config = ctx.obj.get("config") if ctx.obj else None
     if not isinstance(config, HarnessConfig):
-        raise typer.BadParameter("A valid --config file is required for scan.")
+        raise typer.BadParameter("A valid --config file is required for this command.")
     return config
 
 

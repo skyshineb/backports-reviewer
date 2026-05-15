@@ -1,12 +1,16 @@
 from pathlib import Path
 
+import pytest
+
 from backport_harness.storage import (
     connect,
     create_analysis_queue_row_if_missing,
+    finish_analysis_run,
     get_pull_request_inspection,
     init_database,
     list_saved_pull_requests,
     select_analysis_candidates,
+    start_analysis_run,
 )
 
 
@@ -532,6 +536,191 @@ def test_select_analysis_candidates_orders_limits_and_skips_non_retryable(
 
     assert [candidate.github_pr_number for candidate in candidates] == [3, 4]
     assert candidates[0].queue_status == "NEEDS_RETRY"
+
+
+def test_start_analysis_run_locks_queue_and_creates_run(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=20,
+        )
+        started = start_analysis_run(
+            connection,
+            pr_number=12345,
+            run_id="run-1",
+            task_dir=tmp_path / "tasks" / "pr-12345",
+            locked_by="test-worker",
+        )
+        queue_row = connection.execute(
+            "SELECT status, attempts, locked_by FROM analysis_queue WHERE pr_id = ?",
+            (started.pr_id,),
+        ).fetchone()
+        run_row = connection.execute(
+            "SELECT run_id, status, task_dir FROM analysis_runs WHERE id = ?",
+            (started.analysis_run_id,),
+        ).fetchone()
+
+    assert queue_row == ("CODEX_RUNNING", 1, "test-worker")
+    assert run_row == ("run-1", "RUNNING", str(tmp_path / "tasks" / "pr-12345"))
+
+
+def test_start_analysis_run_rejects_non_retryable_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Done",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="DONE",
+            priority=20,
+        )
+        with pytest.raises(ValueError, match="not retryable"):
+            start_analysis_run(
+                connection,
+                pr_number=12345,
+                run_id="run-1",
+                task_dir=tmp_path / "tasks" / "pr-12345",
+                locked_by="test-worker",
+            )
+
+
+def test_start_analysis_run_rejects_running_without_creating_run(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Already running",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="CODEX_RUNNING",
+            priority=20,
+        )
+        with pytest.raises(ValueError, match="not retryable"):
+            start_analysis_run(
+                connection,
+                pr_number=12345,
+                run_id="run-1",
+                task_dir=tmp_path / "tasks" / "pr-12345",
+                locked_by="test-worker",
+            )
+
+        queue_row = connection.execute(
+            "SELECT status, attempts FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()
+        run_count = connection.execute(
+            "SELECT COUNT(*) FROM analysis_runs WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()[0]
+
+    assert queue_row == ("CODEX_RUNNING", 0)
+    assert run_count == 0
+
+
+def test_finish_analysis_run_success_keeps_queue_running(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=20,
+        )
+        started = start_analysis_run(
+            connection,
+            pr_number=12345,
+            run_id="run-1",
+            task_dir=tmp_path / "tasks" / "pr-12345",
+            locked_by="test-worker",
+        )
+        finish_analysis_run(
+            connection,
+            pr_id=started.pr_id,
+            analysis_run_id=started.analysis_run_id,
+            codex_exit_code=0,
+            timed_out=False,
+            result_json_path=tmp_path / "tasks" / "pr-12345" / "output" / "codex_result.json",
+            notes_path=tmp_path / "tasks" / "pr-12345" / "output" / "notes.md",
+            stdout_log_path=tmp_path / "stdout.log",
+            stderr_log_path=tmp_path / "stderr.log",
+            attempts=started.attempts,
+            max_attempts=2,
+        )
+        queue_status = connection.execute(
+            "SELECT status FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()[0]
+        run_status = connection.execute(
+            "SELECT status, codex_exit_code FROM analysis_runs WHERE id = ?",
+            (started.analysis_run_id,),
+        ).fetchone()
+
+    assert queue_status == "CODEX_RUNNING"
+    assert run_status == ("CODEX_EXITED", 0)
+
+
+def test_finish_analysis_run_failure_updates_queue_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=20,
+        )
+        started = start_analysis_run(
+            connection,
+            pr_number=12345,
+            run_id="run-1",
+            task_dir=tmp_path / "tasks" / "pr-12345",
+            locked_by="test-worker",
+        )
+        finish_analysis_run(
+            connection,
+            pr_id=started.pr_id,
+            analysis_run_id=started.analysis_run_id,
+            codex_exit_code=1,
+            timed_out=False,
+            result_json_path=tmp_path / "result.json",
+            notes_path=None,
+            stdout_log_path=tmp_path / "stdout.log",
+            stderr_log_path=tmp_path / "stderr.log",
+            attempts=started.attempts,
+            max_attempts=2,
+        )
+        queue_row = connection.execute(
+            "SELECT status, locked_at, locked_by, last_error FROM analysis_queue WHERE pr_id = ?",
+            (started.pr_id,),
+        ).fetchone()
+
+    assert queue_row == ("NEEDS_RETRY", None, None, "Codex exited with 1.")
 
 
 def _insert_saved_pr(

@@ -9,9 +9,13 @@ Create public upstream clone and per-PR public OSS `0.15` worktrees without ever
 - Create `backport_harness/repo_manager.py`.
 - Create `backport_harness/worktree_manager.py`.
 - Clone `local_repo.upstream_url` into `local_repo.repo_dir` if missing.
+- Use a blobless partial clone for the public upstream repo to avoid downloading
+  full file history during the first smoke test.
 - Fetch configured branches before preparing worktrees.
+- Treat configured branch alias `0.15` as public Hudi remote branch
+  `release-0.15.0` for local Git fetch/worktree operations.
 - Verify existing remote URL matches the configured public upstream URL.
-- Create clean detached worktrees from public upstream `origin/0.15`.
+- Create clean detached worktrees from public upstream `origin/release-0.15.0`.
 - Use the default layout `workspace/worktrees/pr-<number>-015/`.
 - Remove stale worktrees only when they are under configured `worktree_dir` and are not the main upstream clone.
 - Wrap Git subprocess calls in a helper that captures stdout/stderr and disables prompts.
@@ -46,4 +50,3 @@ Create public upstream clone and per-PR public OSS `0.15` worktrees without ever
 - No private fork remote may be inferred or used.
 - This milestone does not invoke Codex.
 - Worktrees are preserved on failed analysis by default; cleanup policy beyond safe stale replacement is out of scope.
-

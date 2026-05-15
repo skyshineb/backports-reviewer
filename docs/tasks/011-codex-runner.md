@@ -18,12 +18,16 @@ Implement a Codex subprocess runner that executes one prepared analysis safely, 
 - Strip GitHub credential environment variables before every Codex spawn while preserving provider auth needed by Codex.
 - Set `GIT_TERMINAL_PROMPT=0`.
 - Wire one-PR analysis to lock the queue item, create an `analysis_runs` row, mark `CODEX_RUNNING`, invoke the runner outside an open SQLite transaction, store log paths and exit code, and preserve task directories on failure.
+- Lock the queue item before rebuilding the task bundle so duplicate invocations cannot delete files for an in-flight run.
+- Mark locked runs as infra failures and release the queue lock if task preparation or Codex process spawn fails before a normal result is returned.
+- Strip blocked GitHub credential variables after merging any caller-supplied Codex environment.
 
 ## Expected Behavior
 
 - `backport-harness analyze --pr 12345` can invoke Codex for one prepared PR once prerequisite milestones exist.
 - Timeout defaults to 7200 seconds.
 - Non-zero exits and timeouts preserve logs and mark retryable or infra-failed state according to the state machine.
+- Task preparation or Codex spawn errors preserve logs, release the queue lock, and mark the attempt retryable or infra-failed according to the state machine.
 - Codex never receives GitHub token environment variables.
 
 ## Affected Modules or Commands
@@ -42,10 +46,11 @@ Implement a Codex subprocess runner that executes one prepared analysis safely, 
 - Assert timeout kills the process group.
 - Assert GitHub credential variables are stripped and provider auth remains.
 - Assert queue/run status updates happen around execution and not inside a long transaction.
+- Assert non-retryable or already-running PRs are rejected before task bundle directories are rebuilt.
+- Assert task preparation or Codex spawn exceptions finalize the run and release the queue lock.
 
 ## Assumptions and Explicit Non-goals
 
 - Codex is the only supported agent backend in v1.
 - Resume support is out of scope unless a later analysis-flow task requires it.
 - Codex cwd must be a task directory or public OSS worktree, never the project root or private path.
-

@@ -449,7 +449,81 @@ def test_analyze_without_dry_run_fails(tmp_path: Path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "not implemented yet" in result.output
+    assert "Use --dry-run or --pr" in result.output
+
+
+def test_analyze_pr_invokes_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+    calls = []
+
+    def fake_analyze_one_pr(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            run_id="run-1",
+            codex_result=SimpleNamespace(exit_code=0, timed_out=False),
+        )
+
+    monkeypatch.setattr("backport_harness.main.analyze_one_pr", fake_analyze_one_pr)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "analyze",
+            "--pr",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["pr_number"] == 12345
+    assert "Analyzed PR #12345 in run run-1" in result.output
+    assert "exit=0" in result.output
+    assert "timed_out=False" in result.output
+
+
+def test_analyze_pr_rejects_invalid_pr(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "analyze",
+            "--pr",
+            "0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "positive integer" in result.output
+
+
+def test_analyze_pr_cannot_be_combined_with_dry_run(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "analyze",
+            "--pr",
+            "12345",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot be combined" in result.output
 
 
 def test_analyze_rejects_invalid_limit(tmp_path: Path) -> None:
