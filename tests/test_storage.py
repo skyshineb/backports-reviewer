@@ -596,6 +596,44 @@ def test_start_analysis_run_rejects_non_retryable_status(tmp_path: Path) -> None
             )
 
 
+def test_start_analysis_run_rejects_running_without_creating_run(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Already running",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="CODEX_RUNNING",
+            priority=20,
+        )
+        with pytest.raises(ValueError, match="not retryable"):
+            start_analysis_run(
+                connection,
+                pr_number=12345,
+                run_id="run-1",
+                task_dir=tmp_path / "tasks" / "pr-12345",
+                locked_by="test-worker",
+            )
+
+        queue_row = connection.execute(
+            "SELECT status, attempts FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()
+        run_count = connection.execute(
+            "SELECT COUNT(*) FROM analysis_runs WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()[0]
+
+    assert queue_row == ("CODEX_RUNNING", 0)
+    assert run_count == 0
+
+
 def test_finish_analysis_run_success_keeps_queue_running(tmp_path: Path) -> None:
     sqlite_path = tmp_path / "backport_harness.sqlite3"
     init_database(sqlite_path)

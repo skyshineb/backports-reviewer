@@ -490,6 +490,7 @@ def finish_analysis_run(
     stderr_log_path: Path,
     attempts: int,
     max_attempts: int,
+    last_error: str | None = None,
 ) -> None:
     now = _utc_now()
     if timed_out:
@@ -529,7 +530,10 @@ def finish_analysis_run(
     queue_status = (
         QUEUE_STATUS_NEEDS_RETRY if attempts < max_attempts else QUEUE_STATUS_FAILED_INFRA
     )
-    last_error = "Codex timed out." if timed_out else f"Codex exited with {codex_exit_code}."
+    if last_error is None:
+        last_error = (
+            "Codex timed out." if timed_out else f"Codex exited with {codex_exit_code}."
+        )
     connection.execute(
         """
         UPDATE analysis_queue

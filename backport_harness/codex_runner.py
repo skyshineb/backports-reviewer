@@ -106,12 +106,12 @@ def run_codex(request: CodexRunRequest) -> CodexRunResult:
 
 def _codex_env(request: CodexRunRequest) -> dict[str, str]:
     env = os.environ.copy()
+    env.update(request.extra_env)
     blocked = set(GITHUB_CREDENTIAL_ENV_VARS)
     if request.github_token_env:
         blocked.add(request.github_token_env)
     for key in blocked:
         env.pop(key, None)
-    env.update(request.extra_env)
     env["GIT_TERMINAL_PROMPT"] = "0"
     return env
 

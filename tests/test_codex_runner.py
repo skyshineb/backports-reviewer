@@ -98,3 +98,39 @@ def test_run_codex_timeout_signals_process_group(tmp_path: Path, monkeypatch) ->
 
     assert result.timed_out is True
     assert signals
+
+
+def test_run_codex_strips_blocked_credentials_from_extra_env(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
+
+    run_codex(
+        CodexRunRequest(
+            prompt="do work",
+            cwd=tmp_path,
+            timeout_seconds=30,
+            output_result_path=tmp_path / "output" / "codex_result.json",
+            extra_env={
+                "GITHUB_TOKEN": "extra-secret",
+                "GH_TOKEN": "extra-secret",
+                "CUSTOM_GITHUB_TOKEN": "extra-secret",
+                "OPENAI_API_KEY": "provider-secret",
+            },
+            github_token_env="CUSTOM_GITHUB_TOKEN",
+        )
+    )
+
+    env = calls[0][1]["env"]
+    assert "GITHUB_TOKEN" not in env
+    assert "GH_TOKEN" not in env
+    assert "CUSTOM_GITHUB_TOKEN" not in env
+    assert env["OPENAI_API_KEY"] == "provider-secret"

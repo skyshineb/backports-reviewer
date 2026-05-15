@@ -42,12 +42,7 @@ def build_task_bundle(
     sqlite_path: Path,
     pr_number: int,
 ) -> TaskBundle:
-    if pr_number < 1:
-        raise ValueError("pr_number must be a positive integer.")
-
-    task_root = _resolve_task_root(config)
-    task_dir = task_root / f"pr-{pr_number}"
-    _validate_task_path(config, task_root, task_dir)
+    task_dir = resolve_task_dir(config=config, pr_number=pr_number)
 
     with connect(sqlite_path) as connection:
         pull_request = get_pull_request_inspection(connection, pr_number=pr_number)
@@ -61,6 +56,7 @@ def build_task_bundle(
     diff_text = _get_pr_diff(config, pull_request.merged_commit_sha)
 
     if task_dir.exists():
+        task_root = _resolve_task_root(config)
         _validate_task_path(config, task_root, task_dir)
         shutil.rmtree(task_dir)
 
@@ -95,6 +91,16 @@ def build_task_bundle(
         logs_dir=logs_dir,
         patches_dir=patches_dir,
     )
+
+
+def resolve_task_dir(*, config: HarnessConfig, pr_number: int) -> Path:
+    if pr_number < 1:
+        raise ValueError("pr_number must be a positive integer.")
+
+    task_root = _resolve_task_root(config)
+    task_dir = task_root / f"pr-{pr_number}"
+    _validate_task_path(config, task_root, task_dir)
+    return task_dir
 
 
 def _resolve_task_root(config: HarnessConfig) -> Path:
