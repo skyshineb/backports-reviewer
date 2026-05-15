@@ -8,6 +8,7 @@ from backport_harness.state_machine import (
     QUEUE_STATUS_QUEUED,
     QUEUE_STATUS_REPORTABLE,
     QUEUE_STATUS_RUNNING,
+    QUEUE_STATUS_VALIDATED,
     assign_initial_priority,
     is_allowed_transition,
     validate_transition,
@@ -16,6 +17,9 @@ from backport_harness.state_machine import (
 
 def test_queue_transitions_allow_expected_paths() -> None:
     assert is_allowed_transition(QUEUE_STATUS_QUEUED, QUEUE_STATUS_RUNNING)
+    assert is_allowed_transition(QUEUE_STATUS_RUNNING, QUEUE_STATUS_VALIDATED)
+    assert is_allowed_transition(QUEUE_STATUS_VALIDATED, QUEUE_STATUS_REPORTABLE)
+    assert is_allowed_transition(QUEUE_STATUS_VALIDATED, QUEUE_STATUS_DONE)
     assert is_allowed_transition(QUEUE_STATUS_RUNNING, QUEUE_STATUS_DONE)
     assert is_allowed_transition(QUEUE_STATUS_RUNNING, QUEUE_STATUS_REPORTABLE)
     assert is_allowed_transition(QUEUE_STATUS_RUNNING, QUEUE_STATUS_NEEDS_RETRY)

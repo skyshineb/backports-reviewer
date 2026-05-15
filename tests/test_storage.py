@@ -6,6 +6,7 @@ from backport_harness.storage import (
     connect,
     create_analysis_queue_row_if_missing,
     finish_analysis_run,
+    finish_result_validation,
     get_pull_request_inspection,
     init_database,
     list_saved_pull_requests,
@@ -721,6 +722,131 @@ def test_finish_analysis_run_failure_updates_queue_status(tmp_path: Path) -> Non
         ).fetchone()
 
     assert queue_row == ("NEEDS_RETRY", None, None, "Codex exited with 1.")
+
+
+def test_finish_result_validation_success_marks_validated(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=20,
+        )
+        started = start_analysis_run(
+            connection,
+            pr_number=12345,
+            run_id="run-1",
+            task_dir=tmp_path / "tasks" / "pr-12345",
+            locked_by="test-worker",
+        )
+        finish_result_validation(
+            connection,
+            pr_id=started.pr_id,
+            analysis_run_id=started.analysis_run_id,
+            valid=True,
+            attempts=started.attempts,
+            max_attempts=2,
+        )
+        queue_row = connection.execute(
+            "SELECT status, locked_at, locked_by, last_error FROM analysis_queue WHERE pr_id = ?",
+            (started.pr_id,),
+        ).fetchone()
+        run_status = connection.execute(
+            "SELECT status FROM analysis_runs WHERE id = ?",
+            (started.analysis_run_id,),
+        ).fetchone()[0]
+
+    assert queue_row == ("VALIDATED", None, None, None)
+    assert run_status == "VALIDATED"
+
+
+def test_finish_result_validation_failure_updates_queue_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=20,
+        )
+        started = start_analysis_run(
+            connection,
+            pr_number=12345,
+            run_id="run-1",
+            task_dir=tmp_path / "tasks" / "pr-12345",
+            locked_by="test-worker",
+        )
+        finish_result_validation(
+            connection,
+            pr_id=started.pr_id,
+            analysis_run_id=started.analysis_run_id,
+            valid=False,
+            attempts=started.attempts,
+            max_attempts=2,
+            last_error="missing log",
+        )
+        queue_row = connection.execute(
+            "SELECT status, locked_at, locked_by, last_error FROM analysis_queue WHERE pr_id = ?",
+            (started.pr_id,),
+        ).fetchone()
+        run_status = connection.execute(
+            "SELECT status FROM analysis_runs WHERE id = ?",
+            (started.analysis_run_id,),
+        ).fetchone()[0]
+
+    assert queue_row == ("NEEDS_RETRY", None, None, "missing log")
+    assert run_status == "INVALID_RESULT"
+
+
+def test_finish_result_validation_failure_at_max_attempts_marks_failed_infra(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="QUEUED_FOR_ANALYSIS",
+            priority=20,
+        )
+        started = start_analysis_run(
+            connection,
+            pr_number=12345,
+            run_id="run-1",
+            task_dir=tmp_path / "tasks" / "pr-12345",
+            locked_by="test-worker",
+        )
+        finish_result_validation(
+            connection,
+            pr_id=started.pr_id,
+            analysis_run_id=started.analysis_run_id,
+            valid=False,
+            attempts=started.attempts,
+            max_attempts=1,
+            last_error="malformed result",
+        )
+        queue_status = connection.execute(
+            "SELECT status FROM analysis_queue WHERE pr_id = ?",
+            (started.pr_id,),
+        ).fetchone()[0]
+
+    assert queue_status == "FAILED_INFRA"
 
 
 def _insert_saved_pr(
