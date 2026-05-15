@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from backport_harness.codex_result import Decision, parse_codex_result_json
 from backport_harness.storage import (
     connect,
     create_analysis_queue_row_if_missing,
@@ -10,8 +11,10 @@ from backport_harness.storage import (
     get_pull_request_inspection,
     init_database,
     list_saved_pull_requests,
+    queue_status_for_decision,
     select_analysis_candidates,
     start_analysis_run,
+    store_validated_decision,
 )
 
 
@@ -847,6 +850,263 @@ def test_finish_result_validation_failure_at_max_attempts_marks_failed_infra(
         ).fetchone()[0]
 
     assert queue_status == "FAILED_INFRA"
+
+
+def test_store_validated_decision_persists_decision_evidence_and_test_runs(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+    result = _valid_codex_result()
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="VALIDATED",
+            priority=20,
+        )
+        analysis_run_id = _insert_analysis_run(
+            connection,
+            pr_id=pr_id,
+            run_id="run-1",
+        )
+
+        decision_id = store_validated_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=analysis_run_id,
+            result=result,
+        )
+
+        decision_row = connection.execute(
+            """
+            SELECT decision, confidence, bugfix_classification, applies_to_oss_015,
+                   reason, human_action
+            FROM decisions
+            WHERE id = ?
+            """,
+            (decision_id,),
+        ).fetchone()
+        evidence_rows = connection.execute(
+            """
+            SELECT evidence_type, description, file_path, command, exit_code, log_path
+            FROM evidence
+            WHERE decision_id = ?
+            ORDER BY id
+            """,
+            (decision_id,),
+        ).fetchall()
+        test_run_rows = connection.execute(
+            """
+            SELECT phase, command, exit_code, result, log_path
+            FROM test_runs
+            WHERE analysis_run_id = ?
+            ORDER BY id
+            """,
+            (analysis_run_id,),
+        ).fetchall()
+        queue_status = connection.execute(
+            "SELECT status, locked_at, locked_by, last_error FROM analysis_queue WHERE pr_id = ?",
+            (pr_id,),
+        ).fetchone()
+
+    assert decision_row == (
+        "MASTER_FIX_VERIFIED_ON_015",
+        "very_high",
+        "correctness_bugfix",
+        1,
+        "The affected class and method exist in OSS 0.15.",
+        "Review adapted patch and backport if appropriate.",
+    )
+    assert evidence_rows == [
+        (
+            "code_presence",
+            "Class Foo exists in OSS 0.15.",
+            "hudi-client/src/main/java/example/Foo.java",
+            None,
+            None,
+            None,
+        ),
+        (
+            "test_failure",
+            "Test fails with the expected error before the fix.",
+            None,
+            "mvn test",
+            1,
+            "output/logs/test-before-fix.log",
+        ),
+        (
+            "test_pass",
+            "Test passes after the adapted fix.",
+            None,
+            "mvn test",
+            0,
+            "output/logs/test-after-fix.log",
+        ),
+    ]
+    assert test_run_rows == [
+        (
+            "test_before_fix",
+            "mvn test",
+            1,
+            "failed_with_expected_error",
+            "output/logs/test-before-fix.log",
+        ),
+        (
+            "fix_verification",
+            "mvn test",
+            0,
+            "passed_after_adapted_fix",
+            "output/logs/test-after-fix.log",
+        ),
+    ]
+    assert queue_status == ("REPORTABLE", None, None, None)
+
+
+def test_store_validated_decision_preserves_previous_decisions(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="VALIDATED",
+            priority=20,
+        )
+        first_run_id = _insert_analysis_run(connection, pr_id=pr_id, run_id="run-1")
+        second_run_id = _insert_analysis_run(connection, pr_id=pr_id, run_id="run-2")
+        _insert_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=first_run_id,
+            decision="INCONCLUSIVE",
+            created_at="2024-01-01T00:05:00Z",
+        )
+
+        store_validated_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=second_run_id,
+            result=_valid_codex_result(decision="MASTER_NOT_APPLICABLE"),
+        )
+
+        decision_rows = connection.execute(
+            """
+            SELECT analysis_run_id, decision
+            FROM decisions
+            WHERE pr_id = ?
+            ORDER BY id
+            """,
+            (pr_id,),
+        ).fetchall()
+        listed = list_saved_pull_requests(connection)
+        inspected = get_pull_request_inspection(connection, pr_number=12345)
+
+    assert decision_rows == [
+        (first_run_id, "INCONCLUSIVE"),
+        (second_run_id, "MASTER_NOT_APPLICABLE"),
+    ]
+    assert listed[0].latest_decision == "MASTER_NOT_APPLICABLE"
+    assert inspected is not None
+    assert inspected.latest_decision is not None
+    assert inspected.latest_decision.decision == "MASTER_NOT_APPLICABLE"
+
+
+@pytest.mark.parametrize(
+    ("decision", "queue_status"),
+    [
+        (Decision.DIRECT_015_BUGFIX, "REPORTABLE"),
+        (Decision.MASTER_POSSIBLY_APPLICABLE, "REPORTABLE"),
+        (Decision.MASTER_REPRODUCED_ON_015, "REPORTABLE"),
+        (Decision.MASTER_FIX_VERIFIED_ON_015, "REPORTABLE"),
+        (Decision.INCONCLUSIVE, "REPORTABLE"),
+        (Decision.NEEDS_HUMAN_REVIEW, "REPORTABLE"),
+        (Decision.MASTER_NOT_APPLICABLE, "DONE"),
+        (Decision.DISCARDED_NON_BUGFIX, "DONE"),
+        (Decision.DISCARDED_DOCS_ONLY, "DONE"),
+        (Decision.DISCARDED_CI_ONLY, "DONE"),
+        (Decision.DISCARDED_RELEASE_ONLY, "DONE"),
+        (Decision.FAILED_INFRA, "FAILED_INFRA"),
+    ],
+)
+def test_queue_status_for_decision(decision: Decision, queue_status: str) -> None:
+    assert queue_status_for_decision(decision) == queue_status
+
+
+def _valid_codex_result(*, decision: str = "MASTER_FIX_VERIFIED_ON_015"):
+    return parse_codex_result_json(
+        """
+        {
+          "schema_version": 1,
+          "pr_number": 12345,
+          "target_branch": "master",
+          "decision": "%s",
+          "confidence": "very_high",
+          "bugfix_classification": "correctness_bugfix",
+          "summary": "Fixes null handling in compaction scheduling.",
+          "human_action": "Review adapted patch and backport if appropriate.",
+          "applicability": {
+            "applies_to_oss_015": true,
+            "reason": "The affected class and method exist in OSS 0.15.",
+            "affected_public_paths": [],
+            "missing_public_paths": []
+          },
+          "test_transplant": {
+            "attempted": true,
+            "result": "applied_and_compiled",
+            "notes": "Adapted imports."
+          },
+          "test_before_fix": {
+            "attempted": true,
+            "command": "mvn test",
+            "exit_code": 1,
+            "result": "failed_with_expected_error",
+            "log_path": "output/logs/test-before-fix.log"
+          },
+          "fix_verification": {
+            "attempted": true,
+            "command": "mvn test",
+            "exit_code": 0,
+            "result": "passed_after_adapted_fix",
+            "patch_path": "output/patches/adapted-fix.patch",
+            "log_path": "output/logs/test-after-fix.log"
+          },
+          "evidence": [
+            {
+              "type": "code_presence",
+              "description": "Class Foo exists in OSS 0.15.",
+              "path": "hudi-client/src/main/java/example/Foo.java"
+            },
+            {
+              "type": "test_failure",
+              "description": "Test fails with the expected error before the fix.",
+              "log_path": "output/logs/test-before-fix.log",
+              "command": "mvn test",
+              "exit_code": 1
+            },
+            {
+              "type": "test_pass",
+              "description": "Test passes after the adapted fix.",
+              "log_path": "output/logs/test-after-fix.log",
+              "patch_path": "output/patches/adapted-fix.patch",
+              "command": "mvn test",
+              "exit_code": 0
+            }
+          ]
+        }
+        """
+        % decision
+    )
 
 
 def _insert_saved_pr(

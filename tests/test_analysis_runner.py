@@ -106,7 +106,7 @@ def test_analyze_one_pr_marks_run_failed_when_codex_spawn_fails(
     assert "FileNotFoundError: codex" in Path(run_row[3]).read_text(encoding="utf-8")
 
 
-def test_analyze_one_pr_validates_successful_codex_result(
+def test_analyze_one_pr_stores_successful_validated_codex_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -136,11 +136,45 @@ def test_analyze_one_pr_validates_successful_codex_result(
             "SELECT status, codex_exit_code FROM analysis_runs WHERE pr_id = ?",
             (pr_id,),
         ).fetchone()
+        decision_row = connection.execute(
+            """
+            SELECT decision, confidence, reason
+            FROM decisions
+            WHERE pr_id = ?
+            """,
+            (pr_id,),
+        ).fetchone()
+        evidence_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM evidence
+            JOIN decisions ON decisions.id = evidence.decision_id
+            WHERE decisions.pr_id = ?
+            """,
+            (pr_id,),
+        ).fetchone()[0]
+        test_run_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM test_runs
+            WHERE analysis_run_id = (
+                SELECT id FROM analysis_runs WHERE pr_id = ?
+            )
+            """,
+            (pr_id,),
+        ).fetchone()[0]
 
     assert result.validation is not None
     assert result.validation.valid is True
-    assert queue_row == ("VALIDATED", None, None, None)
+    assert queue_row == ("REPORTABLE", None, None, None)
     assert run_row == ("VALIDATED", 0)
+    assert decision_row == (
+        "MASTER_FIX_VERIFIED_ON_015",
+        "very_high",
+        "The affected class and method exist in OSS 0.15.",
+    )
+    assert evidence_count == 3
+    assert test_run_count == 2
 
 
 def test_analyze_one_pr_invalid_result_is_retryable(
