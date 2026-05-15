@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 from backport_harness.config import HarnessConfig
-from backport_harness.git_runner import run_git
+from backport_harness.git_runner import GitCommandError, run_git
 from backport_harness.repo_manager import ensure_upstream_repo
 from backport_harness.security import (
     validate_no_path_overlap,
@@ -36,6 +36,8 @@ def prepare_oss_015_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
     )
     repo_dir = ensure_upstream_repo(config)
 
+    run_git(["git", "-C", str(repo_dir), "worktree", "prune"])
+
     if target.exists():
         validate_safe_stale_worktree_removal(
             target=target,
@@ -43,7 +45,10 @@ def prepare_oss_015_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
             repo_dir=repo_dir,
             forbidden_prefixes=config.security.forbidden_private_prefixes,
         )
-        shutil.rmtree(target)
+        try:
+            run_git(["git", "-C", str(repo_dir), "worktree", "remove", "--force", str(target)])
+        except GitCommandError:
+            shutil.rmtree(target)
 
     worktree_dir.mkdir(parents=True, exist_ok=True)
     run_git(

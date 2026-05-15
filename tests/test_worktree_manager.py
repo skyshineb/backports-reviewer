@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from backport_harness.git_runner import GitResult
+from backport_harness.git_runner import GitCommandError, GitResult
 from backport_harness.security import SecurityError
 from backport_harness.worktree_manager import prepare_oss_015_worktree
 from tests.test_repo_manager import make_config
@@ -30,6 +30,7 @@ def test_prepare_oss_015_worktree_creates_detached_worktree(
 
     assert target == config.local_repo.worktree_dir / "pr-12345-015"
     assert calls == [
+        ["git", "-C", str(config.local_repo.repo_dir), "worktree", "prune"],
         [
             "git",
             "-C",
@@ -50,6 +51,89 @@ def test_prepare_oss_015_worktree_removes_safe_stale_target(
     config = make_config(tmp_path)
     target = config.local_repo.worktree_dir / "pr-12345-015"
     target.mkdir(parents=True)
+    calls = []
+
+    monkeypatch.setattr(
+        "backport_harness.worktree_manager.ensure_upstream_repo",
+        lambda config: config.local_repo.repo_dir,
+    )
+
+    def fake_run_git(args):
+        calls.append(args)
+        return GitResult(args=args, stdout="", stderr="")
+
+    monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
+
+    prepare_oss_015_worktree(config, pr_number=12345)
+
+    assert calls == [
+        ["git", "-C", str(config.local_repo.repo_dir), "worktree", "prune"],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "worktree",
+            "remove",
+            "--force",
+            str(target),
+        ],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "worktree",
+            "add",
+            "--detach",
+            str(target),
+            "origin/release-0.15.0",
+        ],
+    ]
+
+
+def test_prepare_oss_015_worktree_prunes_missing_registered_worktree(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config = make_config(tmp_path)
+    target = config.local_repo.worktree_dir / "pr-12345-015"
+    calls = []
+
+    monkeypatch.setattr(
+        "backport_harness.worktree_manager.ensure_upstream_repo",
+        lambda config: config.local_repo.repo_dir,
+    )
+
+    def fake_run_git(args):
+        calls.append(args)
+        return GitResult(args=args, stdout="", stderr="")
+
+    monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
+
+    prepare_oss_015_worktree(config, pr_number=12345)
+
+    assert not target.exists()
+    assert calls == [
+        ["git", "-C", str(config.local_repo.repo_dir), "worktree", "prune"],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "worktree",
+            "add",
+            "--detach",
+            str(target),
+            "origin/release-0.15.0",
+        ],
+    ]
+
+
+def test_prepare_oss_015_worktree_falls_back_to_rmtree_for_unregistered_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config = make_config(tmp_path)
+    target = config.local_repo.worktree_dir / "pr-12345-015"
+    target.mkdir(parents=True)
     removed = []
 
     monkeypatch.setattr(
@@ -60,10 +144,13 @@ def test_prepare_oss_015_worktree_removes_safe_stale_target(
         "backport_harness.worktree_manager.shutil.rmtree",
         lambda path: removed.append(path),
     )
-    monkeypatch.setattr(
-        "backport_harness.worktree_manager.run_git",
-        lambda args: GitResult(args=args, stdout="", stderr=""),
-    )
+
+    def fake_run_git(args):
+        if args[3:6] == ["worktree", "remove", "--force"]:
+            raise GitCommandError(args=args, returncode=128, stdout="", stderr="not registered")
+        return GitResult(args=args, stdout="", stderr="")
+
+    monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
 
     prepare_oss_015_worktree(config, pr_number=12345)
 
