@@ -12,10 +12,15 @@ from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
 from backport_harness.commands.recover_stale import render_recover_stale
 from backport_harness.commands.report import write_reports
+from backport_harness.commands.retry import render_retry
 from backport_harness.config import DEFAULT_ANALYSIS_LIMIT
 from backport_harness.config import HarnessConfig, load_config
 from backport_harness.logging_config import configure_logging
 from backport_harness.scanner import scan_pull_requests
+from backport_harness.state_machine import (
+    QUEUE_STATUS_FAILED_INFRA,
+    QUEUE_STATUS_NEEDS_RETRY,
+)
 from backport_harness.storage import init_database
 from backport_harness.task_builder import build_task_bundle
 from backport_harness.worktree_manager import prepare_oss_015_worktree
@@ -316,6 +321,57 @@ def recover_stale(
         sqlite_path=config.storage.sqlite_path,
         older_than_seconds=older_than_seconds,
     )
+
+
+@app.command("retry")
+def retry(
+    ctx: typer.Context,
+    pr: Optional[int] = typer.Option(
+        None,
+        "--pr",
+        help="GitHub PR number to queue for another analysis attempt.",
+    ),
+    status: Optional[str] = typer.Option(
+        None,
+        "--status",
+        help="Queue status to bulk retry: NEEDS_RETRY or FAILED_INFRA.",
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Maximum number of PRs to retry by status.",
+    ),
+) -> None:
+    """Queue selected PRs for another analysis attempt."""
+    if (pr is None) == (status is None):
+        raise typer.BadParameter("Exactly one selector is required: --pr or --status.")
+    if pr is not None and pr < 1:
+        raise typer.BadParameter("pr must be a positive integer.")
+    if limit is not None and limit < 1:
+        raise typer.BadParameter("limit must be a positive integer.")
+    if pr is not None and limit is not None:
+        raise typer.BadParameter("--limit cannot be combined with --pr.")
+    if status is not None and status not in {
+        QUEUE_STATUS_NEEDS_RETRY,
+        QUEUE_STATUS_FAILED_INFRA,
+    }:
+        raise typer.BadParameter(
+            "Bulk retry supports only NEEDS_RETRY or FAILED_INFRA. "
+            "Use --pr to retry an INCONCLUSIVE decision."
+        )
+
+    config = _require_config(ctx)
+    resolved_limit = limit if limit is not None else config.analysis.default_limit
+    try:
+        render_retry(
+            sqlite_path=config.storage.sqlite_path,
+            max_attempts=config.codex.max_attempts_per_pr,
+            pr_number=pr,
+            status=status,
+            limit=resolved_limit if status is not None else None,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
 
 
 @db_app.command("init")
