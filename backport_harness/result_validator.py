@@ -225,7 +225,7 @@ def _validate_master_not_applicable(result: CodexResult) -> list[ValidationIssue
         issues.append(
             ValidationIssue(
                 "applicability.reason",
-                "Non-applicability must cite absent file, class, module, feature, or bug introduced after 0.15.",
+                "Non-applicability must cite absent file, class, module, feature, bug introduced after 0.15, or fix behavior already present in OSS 0.15.",
             )
         )
     return issues
@@ -285,6 +285,13 @@ def _mentions_strong_non_applicability_basis(text: str) -> bool:
         or ("missing" in normalized and "feature" in normalized)
         or "introduced after 0.15" in normalized
         or "introduced after `0.15`" in normalized
+        or ("already present" in normalized and "0.15" in normalized)
+        or ("already contains" in normalized and "0.15" in normalized)
+        or (
+            "fix behavior" in normalized
+            and "already" in normalized
+            and "0.15" in normalized
+        )
     )
 
 

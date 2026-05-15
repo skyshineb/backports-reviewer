@@ -539,7 +539,7 @@ flowchart TD
     Bugfix -->|no| DiscardMaster[DISCARDED_NON_BUGFIX]
     Bugfix -->|yes| Exists{Relevant code in OSS 0.15?}
 
-    Exists -->|clearly absent| NotApplicable[MASTER_NOT_APPLICABLE]
+    Exists -->|clearly absent or fix already present| NotApplicable[MASTER_NOT_APPLICABLE]
     Exists -->|exists or uncertain| Test{Can transplant regression test?}
 
     Test -->|no| Possible[MASTER_POSSIBLY_APPLICABLE or INCONCLUSIVE]
@@ -678,6 +678,7 @@ Require at least one strong reason:
 - Affected module absent in `0.15`.
 - Feature absent in `0.15`.
 - Bug introduced after `0.15`.
+- Fix behavior already present in public OSS `0.15`.
 
 ### 10.5 `INCONCLUSIVE`
 

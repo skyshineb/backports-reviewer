@@ -174,6 +174,44 @@ def test_valid_master_not_applicable_result(tmp_path: Path) -> None:
     assert outcome.valid is True
 
 
+def test_valid_master_not_applicable_when_fix_already_present(
+    tmp_path: Path,
+) -> None:
+    payload = _valid_result(decision="MASTER_NOT_APPLICABLE")
+    payload["applicability"] = {
+        "applies_to_oss_015": False,
+        "reason": (
+            "The affected public OSS 0.15 code exists, but the fix behavior "
+            "is already present in HoodieFlinkStreamer append mode."
+        ),
+        "affected_public_paths": [
+            "hudi-flink-datasource/hudi-flink/src/main/java/org/apache/hudi/streamer/HoodieFlinkStreamer.java",
+        ],
+        "missing_public_paths": [],
+    }
+    payload["test_transplant"] = _not_attempted_transplant()
+    payload["test_before_fix"] = _not_attempted_test()
+    payload["fix_verification"] = _not_attempted_fix()
+    payload["evidence"] = [
+        {
+            "type": "non_applicability",
+            "description": (
+                "The target 0.15 worktree already contains the master fix "
+                "behavior, so there is no missing public 0.15 hunk to transplant."
+            ),
+            "path": "hudi-flink-datasource/hudi-flink/src/main/java/org/apache/hudi/streamer/HoodieFlinkStreamer.java",
+        }
+    ]
+    task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is True
+
+
 def test_master_not_applicable_requires_strong_reason(tmp_path: Path) -> None:
     payload = _valid_result(decision="MASTER_NOT_APPLICABLE")
     payload["applicability"]["applies_to_oss_015"] = False
