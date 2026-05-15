@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from backport_harness.report_writer import generate_reports
-from backport_harness.storage import connect, init_database
+from backport_harness.storage import connect, init_database, store_human_review
 
 
 def test_generate_reports_creates_empty_reports_for_missing_database(
@@ -129,6 +129,49 @@ def test_generate_reports_places_prs_in_expected_categories(
     assert discarded[0]["latest_decision"]["decision"] == "DISCARDED_DOCS_ONLY"
     assert result.full_audit_count == 5
     assert {row["pr"]["number"] for row in audit} == {1, 2, 3, 4, 5}
+
+
+def test_generate_reports_includes_command_created_human_review(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=1,
+            title="Possibly applicable fix",
+            branch="master",
+            status="REPORTABLE",
+        )
+        analysis_run_id = _insert_analysis_run(connection, pr_id=pr_id)
+        _insert_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=analysis_run_id,
+            decision="MASTER_POSSIBLY_APPLICABLE",
+            reason="Relevant 0.15 logic exists without test proof",
+            created_at="2024-01-01T00:10:00Z",
+        )
+        store_human_review(
+            connection,
+            pr_number=1,
+            status="accepted_for_backport",
+            comment="Relevant to private fork",
+        )
+
+    result = generate_reports(sqlite_path=sqlite_path, output_dir=tmp_path / "reports")
+
+    candidates = result.backport_candidates_path.read_text(encoding="utf-8")
+    audit = _read_jsonl(result.full_audit_path)
+    assert "accepted_for_backport" in candidates
+    assert audit[0]["human_review"] == {
+        "comment": "Relevant to private fork",
+        "reviewer": None,
+        "status": "accepted_for_backport",
+        "updated_at": audit[0]["human_review"]["updated_at"],
+    }
 
 
 def test_full_audit_includes_all_decisions_and_evidence(tmp_path: Path) -> None:

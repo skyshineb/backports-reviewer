@@ -245,6 +245,17 @@ class ReportPullRequest:
     human_review: ReportHumanReview | None
 
 
+HUMAN_REVIEW_STATUSES = {
+    "pending",
+    "accepted_for_backport",
+    "rejected",
+    "already_present",
+    "not_needed",
+    "backported",
+    "failed_to_backport",
+}
+
+
 def connect(sqlite_path: Path) -> sqlite3.Connection:
     """Open a SQLite connection with project-required pragmas enabled."""
     connection = sqlite3.connect(sqlite_path)
@@ -903,6 +914,48 @@ def store_validated_decision(
         (queue_status, now, pr_id),
     )
     return decision_id
+
+
+def store_human_review(
+    connection: sqlite3.Connection,
+    *,
+    pr_number: int,
+    status: str,
+    comment: str | None = None,
+) -> int:
+    if pr_number <= 0:
+        raise ValueError("pr_number must be positive.")
+    if status not in HUMAN_REVIEW_STATUSES:
+        allowed = ", ".join(sorted(HUMAN_REVIEW_STATUSES))
+        raise ValueError(f"status must be one of: {allowed}.")
+
+    row = connection.execute(
+        """
+        SELECT id
+        FROM prs
+        WHERE github_pr_number = ?
+        ORDER BY target_branch ASC
+        LIMIT 1
+        """,
+        (pr_number,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"No saved PR found for #{pr_number}.")
+
+    cursor = connection.execute(
+        """
+        INSERT INTO human_reviews(
+            pr_id,
+            status,
+            reviewer,
+            comment,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (int(row[0]), status, None, comment, _utc_now()),
+    )
+    return int(cursor.lastrowid)
 
 
 def queue_status_for_decision(decision: Decision) -> str:

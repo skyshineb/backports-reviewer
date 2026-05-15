@@ -17,6 +17,7 @@ from backport_harness.storage import (
     retry_pull_requests,
     select_analysis_candidates,
     start_analysis_run,
+    store_human_review,
     store_validated_decision,
 )
 
@@ -376,6 +377,93 @@ def test_get_pull_request_inspection_returns_failed_run_without_decision(
     )
     assert len(inspection.test_runs) == 1
     assert inspection.test_runs[0].result == "passed"
+
+
+def test_store_human_review_records_latest_review_without_reviewer(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Review me",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="REPORTABLE",
+            priority=50,
+        )
+
+        first_id = store_human_review(
+            connection,
+            pr_number=12345,
+            status="accepted_for_backport",
+            comment="Relevant",
+        )
+        second_id = store_human_review(
+            connection,
+            pr_number=12345,
+            status="backported",
+            comment="Done",
+        )
+
+        rows = connection.execute(
+            """
+            SELECT status, reviewer, comment
+            FROM human_reviews
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        inspection = get_pull_request_inspection(connection, pr_number=12345)
+
+    assert second_id > first_id
+    assert rows == [
+        ("accepted_for_backport", None, "Relevant"),
+        ("backported", None, "Done"),
+    ]
+    assert inspection is not None
+    assert inspection.human_review is not None
+    assert inspection.human_review.status == "backported"
+    assert inspection.human_review.reviewer is None
+    assert inspection.human_review.comment == "Done"
+
+
+def test_store_human_review_rejects_invalid_status(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Review me",
+            branch="master",
+            merged_at="2024-01-02T00:00:00Z",
+            status="REPORTABLE",
+            priority=50,
+        )
+
+        with pytest.raises(ValueError, match="status must be one of"):
+            store_human_review(
+                connection,
+                pr_number=12345,
+                status="needs_review",
+            )
+
+
+def test_store_human_review_rejects_missing_pr(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        with pytest.raises(ValueError, match="No saved PR found"):
+            store_human_review(
+                connection,
+                pr_number=12345,
+                status="rejected",
+            )
 
 
 def test_create_analysis_queue_row_assigns_computed_priority(
