@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from backport_harness.codex_result import (
     CodexResult,
+    Confidence,
     Decision,
     Evidence,
     EvidenceType,
@@ -115,6 +116,14 @@ def _validate_master_fix_verified(
 ) -> list[ValidationIssue]:
     issues = _validate_master_reproduced(result)
 
+    if result.confidence is not Confidence.VERY_HIGH:
+        issues.append(
+            ValidationIssue(
+                "confidence",
+                "MASTER_FIX_VERIFIED_ON_015 requires very_high confidence.",
+            )
+        )
+
     if not result.fix_verification.attempted:
         issues.append(
             ValidationIssue(
@@ -150,10 +159,24 @@ def _validate_master_fix_verified(
                 f"Required patch file is missing: {result.fix_verification.patch_path}",
             )
         )
+    if result.fix_verification.log_path is None:
+        issues.append(
+            ValidationIssue(
+                "fix_verification.log_path",
+                "Fix verification must provide an after-fix log path.",
+            )
+        )
 
     if not _has_evidence(result, EvidenceType.TEST_PASS):
         issues.append(
             ValidationIssue("evidence", "MASTER_FIX_VERIFIED_ON_015 requires test_pass evidence.")
+        )
+    elif not _has_test_pass_for_fix_verification(result):
+        issues.append(
+            ValidationIssue(
+                "evidence",
+                "MASTER_FIX_VERIFIED_ON_015 test_pass evidence must reference the after-fix log and adapted patch.",
+            )
         )
     return issues
 
@@ -317,6 +340,15 @@ def _validate_failed_infra(result: CodexResult) -> list[ValidationIssue]:
 
 def _has_evidence(result: CodexResult, evidence_type: EvidenceType) -> bool:
     return any(evidence.type is evidence_type for evidence in result.evidence)
+
+
+def _has_test_pass_for_fix_verification(result: CodexResult) -> bool:
+    return any(
+        evidence.type is EvidenceType.TEST_PASS
+        and evidence.log_path == result.fix_verification.log_path
+        and evidence.patch_path == result.fix_verification.patch_path
+        for evidence in result.evidence
+    )
 
 
 def _has_expected_failure_description(evidence_items: list[Evidence]) -> bool:

@@ -205,6 +205,8 @@ VERIFY_DECISION_SPECIFIC_REQUIREMENTS = [
     "infra_failure` evidence",
     "`test_failure` evidence item",
     "`test_pass` evidence item",
+    "`confidence: very_high`",
+    "after-fix log path and adapted patch path",
 ]
 MASTER_INVESTIGATION_SEQUENCE = [
     "1. Read `pr.json` for PR metadata.",
@@ -216,7 +218,7 @@ MASTER_INVESTIGATION_SEQUENCE = [
     "7. Compare the master logic with the public OSS 0.15 logic.",
     "8. Decide whether to discard, mark possibly applicable, reproduce with a test, or verify an adapted fix.",
     "9. If a usable public regression test exists, try the smallest focused test transplant.",
-    "10. If reproduction succeeds, optionally apply or adapt the public fix and verify with the focused test.",
+    "10. If reproduction succeeds, optionally apply or adapt the public fix in the public OSS 0.15 worktree, save the adapted patch under `output/patches/`, and rerun the same focused test when possible.",
     "11. Write strict JSON to `output/codex_result.json` and human-readable notes to `output/notes.md`.",
 ]
 

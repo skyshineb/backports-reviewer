@@ -9,7 +9,7 @@ If the fix cannot be adapted or verified from public context, choose `INCONCLUSI
 ## Responsibility
 
 Adapt the public upstream fix to the public OSS 0.15 worktree only when the bug has been reproduced or strong public evidence supports verification.
-Run the focused public test again when available.
+Run the same focused public test again when available.
 Save any adapted patch under `output/patches/` and logs under `output/logs/`.
 
 ## No-Test Policy
@@ -125,7 +125,7 @@ Use null only for fields that are explicitly unavailable because a test, transpl
 
 Decision-specific requirements:
 
-- `MASTER_FIX_VERIFIED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, at least one `test_failure` evidence item, and at least one `test_pass` evidence item.
+- `MASTER_FIX_VERIFIED_ON_015`: require `confidence: very_high`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, a `fix_verification.log_path`, at least one `test_failure` evidence item with the before-fix log path, and at least one `test_pass` evidence item with the after-fix log path and adapted patch path.
 - `MASTER_REPRODUCED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
 - `INCONCLUSIVE` and `NEEDS_HUMAN_REVIEW`: require `uncertainty` evidence and a clear `applicability.reason`.
 - `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or required input file that identifies one of the failures allowed by the `FAILED_INFRA` policy.
