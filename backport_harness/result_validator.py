@@ -12,6 +12,7 @@ from backport_harness.codex_result import (
     EvidenceType,
     FixVerificationResult,
     TestResult,
+    TransplantResult,
     load_codex_result,
 )
 
@@ -97,6 +98,8 @@ def _validate_decision_specific_claims(
         return _validate_master_fix_verified(task_dir, result)
     if result.decision is Decision.MASTER_REPRODUCED_ON_015:
         return _validate_master_reproduced(result)
+    if result.decision is Decision.MASTER_POSSIBLY_APPLICABLE:
+        return _validate_master_possibly_applicable(result)
     if result.decision is Decision.MASTER_NOT_APPLICABLE:
         return _validate_master_not_applicable(result)
     if result.decision in {Decision.INCONCLUSIVE, Decision.NEEDS_HUMAN_REVIEW}:
@@ -157,6 +160,23 @@ def _validate_master_fix_verified(
 
 def _validate_master_reproduced(result: CodexResult) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    if not result.test_transplant.attempted:
+        issues.append(
+            ValidationIssue(
+                "test_transplant.attempted",
+                "Regression test transplant must be attempted.",
+            )
+        )
+    if result.test_transplant.result not in {
+        TransplantResult.APPLIED,
+        TransplantResult.APPLIED_AND_COMPILED,
+    }:
+        issues.append(
+            ValidationIssue(
+                "test_transplant.result",
+                "Regression test transplant must be applied before claiming reproduction.",
+            )
+        )
     if not result.test_before_fix.attempted:
         issues.append(
             ValidationIssue(
@@ -190,6 +210,28 @@ def _validate_master_reproduced(result: CodexResult) -> list[ValidationIssue]:
             ValidationIssue(
                 "test_before_fix.result",
                 "Before-fix failure must identify the expected bug failure.",
+            )
+        )
+    return issues
+
+
+def _validate_master_possibly_applicable(result: CodexResult) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if result.applicability.applies_to_oss_015 is False:
+        issues.append(
+            ValidationIssue(
+                "applicability.applies_to_oss_015",
+                "MASTER_POSSIBLY_APPLICABLE requires applies_to_oss_015=true or unknown.",
+            )
+        )
+    if not (
+        _has_evidence(result, EvidenceType.CODE_PRESENCE)
+        or _has_evidence(result, EvidenceType.LOGIC_MATCH)
+    ):
+        issues.append(
+            ValidationIssue(
+                "evidence",
+                "MASTER_POSSIBLY_APPLICABLE requires code_presence or logic_match evidence.",
             )
         )
     return issues

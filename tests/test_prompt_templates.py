@@ -107,6 +107,15 @@ MASTER_NO_TEST_POLICY_SNIPPETS = [
     "Use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists but there is no test proof.",
     "Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.",
 ]
+TEST_TRANSPLANT_OUTCOME_SNIPPETS = [
+    "No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.",
+    "Test not applicable to public OSS 0.15: use `INCONCLUSIVE`.",
+    "Transplanted test does not compile: use `INCONCLUSIVE`.",
+    "Transplanted test fails with the expected bug before fix: use `MASTER_REPRODUCED_ON_015`.",
+    "Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.",
+    "Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.",
+    "Transplanted test is flaky: use `INCONCLUSIVE`.",
+]
 WORKTREE_CONTEXT_SNIPPET = (
     "Public OSS 0.15 worktree from the rendered task context line "
     "`Public OSS 0.15 worktree: <path>`"
@@ -313,6 +322,15 @@ def test_prompts_define_no_test_policy() -> None:
     )
     for snippet in MASTER_NO_TEST_POLICY_SNIPPETS:
         assert snippet in master_content
+
+
+def test_transplant_prompts_define_outcome_policy() -> None:
+    for prompt_file in ("analyze_master_pr.md", "transplant_test.md"):
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
+        assert "## Test Transplant Outcome Policy" in content
+        for snippet in TEST_TRANSPLANT_OUTCOME_SNIPPETS:
+            assert snippet in content
 
 
 def test_analysis_prompts_rely_on_rendered_worktree_context() -> None:

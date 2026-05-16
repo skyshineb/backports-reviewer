@@ -11,6 +11,8 @@ from backport_harness.codex_result import (
     Confidence,
     Decision,
     EvidenceType,
+    TestResult as CodexTestResult,
+    TransplantResult,
     load_codex_result,
     parse_codex_result_json,
 )
@@ -272,6 +274,48 @@ def test_optional_nulls_are_accepted_for_not_attempted_steps() -> None:
     assert result.test_transplant.result is None
     assert result.test_before_fix.log_path is None
     assert result.fix_verification.patch_path is None
+
+
+@pytest.mark.parametrize(
+    "transplant_result",
+    [
+        "not_found",
+        "not_applicable",
+        "applied",
+        "applied_and_compiled",
+        "does_not_compile",
+        "failed",
+        "skipped",
+    ],
+)
+def test_supported_test_transplant_results_parse(transplant_result: str) -> None:
+    payload = valid_result()
+    payload["test_transplant"]["result"] = transplant_result
+
+    result = parse_result(payload)
+
+    assert result.test_transplant.result is TransplantResult(transplant_result)
+
+
+@pytest.mark.parametrize(
+    "test_result",
+    [
+        "passed",
+        "failed",
+        "failed_with_expected_error",
+        "failed_with_unrelated_error",
+        "did_not_compile",
+        "flaky",
+        "timeout",
+    ],
+)
+def test_supported_before_fix_test_results_parse(test_result: str) -> None:
+    payload = valid_result()
+    payload["test_before_fix"]["result"] = test_result
+
+    result = parse_result(payload)
+
+    assert result.test_before_fix.result is CodexTestResult(test_result)
 
 
 def test_unknown_extra_fields_fail_validation() -> None:

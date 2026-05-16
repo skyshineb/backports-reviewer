@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from backport_harness.result_validator import validate_codex_result_file
 
 
@@ -131,6 +133,29 @@ def test_valid_master_reproduced_result(tmp_path: Path) -> None:
     assert outcome.valid is True
 
 
+def test_master_reproduced_requires_applied_transplant(tmp_path: Path) -> None:
+    payload = _valid_result(decision="MASTER_REPRODUCED_ON_015")
+    payload["test_transplant"] = {
+        "attempted": True,
+        "result": "does_not_compile",
+        "notes": "Missing old API equivalent.",
+    }
+    payload["fix_verification"] = _not_attempted_fix()
+    payload["evidence"] = [
+        payload["evidence"][0],
+        payload["evidence"][1],
+    ]
+    task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is False
+    assert "Regression test transplant must be applied" in outcome.summary
+
+
 def test_master_reproduced_requires_expected_failure(tmp_path: Path) -> None:
     payload = _valid_result(decision="MASTER_REPRODUCED_ON_015")
     payload["fix_verification"] = _not_attempted_fix()
@@ -145,6 +170,81 @@ def test_master_reproduced_requires_expected_failure(tmp_path: Path) -> None:
 
     assert outcome.valid is False
     assert "expected bug failure" in outcome.summary
+
+
+def test_valid_master_possibly_applicable_with_passing_transplanted_test(
+    tmp_path: Path,
+) -> None:
+    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE", confidence="medium")
+    payload["test_transplant"] = {
+        "attempted": True,
+        "result": "applied_and_compiled",
+        "notes": "Adapted imports to public OSS 0.15 APIs.",
+    }
+    payload["test_before_fix"] = {
+        "attempted": True,
+        "command": "mvn -pl hudi-client -Dtest=TestFoo#testNullCase test",
+        "exit_code": 0,
+        "result": "passed",
+        "log_path": "output/logs/test-before-fix.log",
+    }
+    payload["fix_verification"] = _not_attempted_fix()
+    payload["evidence"] = [
+        {
+            "type": "code_presence",
+            "description": "The affected method exists in public OSS 0.15.",
+            "path": "hudi-client/src/main/java/example/Foo.java",
+        }
+    ]
+    task_dir = _write_result(tmp_path, payload, logs=("test-before-fix.log",))
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is True
+
+
+def test_master_possibly_applicable_requires_code_or_logic_evidence(
+    tmp_path: Path,
+) -> None:
+    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE")
+    payload["test_before_fix"] = _not_attempted_test()
+    payload["fix_verification"] = _not_attempted_fix()
+    payload["evidence"] = [
+        {
+            "type": "classification",
+            "description": "This looks like a bugfix.",
+        }
+    ]
+    task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is False
+    assert "code_presence or logic_match evidence" in outcome.summary
+
+
+def test_master_possibly_applicable_rejects_negative_applicability(
+    tmp_path: Path,
+) -> None:
+    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE")
+    payload["applicability"]["applies_to_oss_015"] = False
+    payload["test_before_fix"] = _not_attempted_test()
+    payload["fix_verification"] = _not_attempted_fix()
+    task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is False
+    assert "requires applies_to_oss_015=true or unknown" in outcome.summary
 
 
 def test_valid_master_not_applicable_result(tmp_path: Path) -> None:
@@ -251,6 +351,75 @@ def test_valid_inconclusive_result(tmp_path: Path) -> None:
         }
     ]
     task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is True
+
+
+@pytest.mark.parametrize(
+    ("transplant_result", "test_result", "exit_code", "description"),
+    [
+        ("not_found", None, None, "No public regression test was found."),
+        (
+            "not_applicable",
+            None,
+            None,
+            "The public regression test is not applicable to OSS 0.15.",
+        ),
+        (
+            "does_not_compile",
+            "did_not_compile",
+            1,
+            "The transplanted test does not compile on public OSS 0.15.",
+        ),
+        (
+            "applied_and_compiled",
+            "failed_with_unrelated_error",
+            1,
+            "The transplanted test fails with an unrelated error.",
+        ),
+        (
+            "applied_and_compiled",
+            "flaky",
+            1,
+            "The transplanted test is flaky on public OSS 0.15.",
+        ),
+    ],
+)
+def test_inconclusive_accepts_failed_transplant_outcomes(
+    tmp_path: Path,
+    transplant_result: str,
+    test_result: str | None,
+    exit_code: int | None,
+    description: str,
+) -> None:
+    payload = _valid_result(decision="INCONCLUSIVE", confidence="unknown")
+    payload["test_transplant"] = {
+        "attempted": True,
+        "result": transplant_result,
+        "notes": description,
+    }
+    payload["test_before_fix"] = {
+        "attempted": test_result is not None,
+        "command": "mvn test" if test_result is not None else None,
+        "exit_code": exit_code,
+        "result": test_result,
+        "log_path": "output/logs/test-before-fix.log" if test_result is not None else None,
+    }
+    payload["fix_verification"] = _not_attempted_fix()
+    payload["evidence"] = [
+        {
+            "type": "uncertainty",
+            "description": description,
+            "log_path": "output/logs/test-before-fix.log" if test_result is not None else None,
+        }
+    ]
+    logs = ("test-before-fix.log",) if test_result is not None else ()
+    task_dir = _write_result(tmp_path, payload, logs=logs)
 
     outcome = validate_codex_result_file(
         task_dir=task_dir,
