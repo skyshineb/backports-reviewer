@@ -247,6 +247,53 @@ def test_master_possibly_applicable_rejects_negative_applicability(
     assert "requires applies_to_oss_015=true or unknown" in outcome.summary
 
 
+@pytest.mark.parametrize(
+    ("test_result", "exit_code"),
+    [
+        ("failed", 1),
+        ("failed_with_unrelated_error", 1),
+        ("did_not_compile", 1),
+        ("flaky", 1),
+        ("timeout", 124),
+    ],
+)
+def test_master_possibly_applicable_rejects_failed_transplant_outcomes(
+    tmp_path: Path,
+    test_result: str,
+    exit_code: int,
+) -> None:
+    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE", confidence="medium")
+    payload["test_transplant"] = {
+        "attempted": True,
+        "result": "applied_and_compiled",
+        "notes": "Adapted imports to public OSS 0.15 APIs.",
+    }
+    payload["test_before_fix"] = {
+        "attempted": True,
+        "command": "mvn -pl hudi-client -Dtest=TestFoo#testNullCase test",
+        "exit_code": exit_code,
+        "result": test_result,
+        "log_path": "output/logs/test-before-fix.log",
+    }
+    payload["fix_verification"] = _not_attempted_fix()
+    payload["evidence"] = [
+        {
+            "type": "code_presence",
+            "description": "The affected method exists in public OSS 0.15.",
+            "path": "hudi-client/src/main/java/example/Foo.java",
+        }
+    ]
+    task_dir = _write_result(tmp_path, payload, logs=("test-before-fix.log",))
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is False
+    assert "must use INCONCLUSIVE" in outcome.summary
+
+
 def test_valid_master_not_applicable_result(tmp_path: Path) -> None:
     payload = _valid_result(decision="MASTER_NOT_APPLICABLE")
     payload["applicability"] = {

@@ -234,6 +234,19 @@ def _validate_master_possibly_applicable(result: CodexResult) -> list[Validation
                 "MASTER_POSSIBLY_APPLICABLE requires code_presence or logic_match evidence.",
             )
         )
+    if result.test_before_fix.result in {
+        TestResult.FAILED,
+        TestResult.FAILED_WITH_UNRELATED_ERROR,
+        TestResult.DID_NOT_COMPILE,
+        TestResult.FLAKY,
+        TestResult.TIMEOUT,
+    }:
+        issues.append(
+            ValidationIssue(
+                "test_before_fix.result",
+                "Failed, non-compiling, flaky, or timed-out transplant tests must use INCONCLUSIVE.",
+            )
+        )
     return issues
 
 
