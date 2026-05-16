@@ -152,6 +152,7 @@ class InspectedEvidence:
     command: str | None
     exit_code: int | None
     log_path: str | None
+    patch_path: str | None
 
 
 @dataclass(frozen=True)
@@ -204,6 +205,7 @@ class ReportEvidence:
     command: str | None
     exit_code: int | None
     log_path: str | None
+    patch_path: str | None
 
 
 @dataclass(frozen=True)
@@ -861,9 +863,10 @@ def store_validated_decision(
             file_path,
             command,
             exit_code,
-            log_path
+            log_path,
+            patch_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -874,6 +877,7 @@ def store_validated_decision(
                 evidence.command,
                 evidence.exit_code,
                 evidence.log_path,
+                evidence.patch_path,
             )
             for evidence in result.evidence
         ],
@@ -1866,7 +1870,8 @@ def _get_inspected_evidence(
             evidence.file_path,
             evidence.command,
             evidence.exit_code,
-            evidence.log_path
+            evidence.log_path,
+            evidence.patch_path
         FROM evidence
         JOIN decisions ON decisions.id = evidence.decision_id
         WHERE decisions.pr_id = ? AND decisions.analysis_run_id = ?
@@ -1883,6 +1888,7 @@ def _get_inspected_evidence(
             command=row[3],
             exit_code=row[4],
             log_path=row[5],
+            patch_path=row[6],
         )
         for row in rows
     ]
@@ -1962,7 +1968,8 @@ def _get_report_evidence_by_decision(
             file_path,
             command,
             exit_code,
-            log_path
+            log_path,
+            patch_path
         FROM evidence
         ORDER BY decision_id ASC, id ASC
         """
@@ -1978,6 +1985,7 @@ def _get_report_evidence_by_decision(
                 command=row[4],
                 exit_code=row[5],
                 log_path=row[6],
+                patch_path=row[7],
             )
         )
     return evidence_by_decision

@@ -262,6 +262,7 @@ def _decision_json_object(decision: ReportDecision | None) -> dict[str, Any] | N
                 "command": evidence.command,
                 "exit_code": evidence.exit_code,
                 "log_path": evidence.log_path,
+                "patch_path": evidence.patch_path,
             }
             for evidence in decision.evidence
         ],

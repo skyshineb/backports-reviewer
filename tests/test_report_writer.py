@@ -217,6 +217,10 @@ def test_full_audit_includes_all_decisions_and_evidence(tmp_path: Path) -> None:
     ]
     assert audit[0]["decisions"][0]["evidence"][0]["description"] == "unclear"
     assert audit[0]["decisions"][1]["evidence"][0]["description"] == "absent"
+    assert (
+        audit[0]["decisions"][1]["evidence"][0]["patch_path"]
+        == "output/patches/adapted-fix.patch"
+    )
 
 
 def test_generate_reports_overwrites_stale_content_after_decision_changes(
@@ -402,9 +406,10 @@ def _insert_evidence(connection, *, decision_id: int, description: str) -> None:
             file_path,
             command,
             exit_code,
-            log_path
+            log_path,
+            patch_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             decision_id,
@@ -414,6 +419,7 @@ def _insert_evidence(connection, *, decision_id: int, description: str) -> None:
             "mvn test",
             0,
             "workspace/tasks/pr-123/output/logs/test.log",
+            "output/patches/adapted-fix.patch",
         ),
     )
 

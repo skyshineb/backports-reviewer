@@ -428,6 +428,7 @@ CREATE TABLE IF NOT EXISTS evidence (
     command TEXT,
     exit_code INTEGER,
     log_path TEXT,
+    patch_path TEXT,
     FOREIGN KEY(decision_id) REFERENCES decisions(id)
 );
 ```

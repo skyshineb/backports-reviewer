@@ -116,6 +116,50 @@ def test_fix_verified_rejects_after_fix_failure(tmp_path: Path) -> None:
     assert "Fix verification must exit with code 0" in outcome.summary
 
 
+def test_fix_verified_rejects_missing_after_fix_log_path(tmp_path: Path) -> None:
+    payload = _valid_result()
+    payload["fix_verification"]["log_path"] = None
+    payload["evidence"][2]["log_path"] = None
+    task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is False
+    assert "after-fix log path" in outcome.summary
+
+
+def test_fix_verified_rejects_without_very_high_confidence(tmp_path: Path) -> None:
+    payload = _valid_result(confidence="high")
+    task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is False
+    assert "requires very_high confidence" in outcome.summary
+
+
+def test_fix_verified_rejects_test_pass_evidence_without_patch_path(
+    tmp_path: Path,
+) -> None:
+    payload = _valid_result()
+    payload["evidence"][2]["patch_path"] = None
+    task_dir = _write_result(tmp_path, payload)
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+    )
+
+    assert outcome.valid is False
+    assert "after-fix log and adapted patch" in outcome.summary
+
+
 def test_valid_master_reproduced_result(tmp_path: Path) -> None:
     payload = _valid_result(decision="MASTER_REPRODUCED_ON_015")
     payload["fix_verification"] = _not_attempted_fix()

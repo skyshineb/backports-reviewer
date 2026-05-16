@@ -72,7 +72,7 @@ def test_init_database_can_be_rerun_safely(tmp_path: Path) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
 
-    assert rows == [("001_initial.sql",)]
+    assert rows == [("001_initial.sql",), ("002_evidence_patch_path.sql",)]
 
 
 def test_connect_enables_foreign_keys(tmp_path: Path) -> None:
@@ -335,6 +335,7 @@ def test_get_pull_request_inspection_returns_post_analysis_details(
     )
     assert len(inspection.evidence) == 1
     assert inspection.evidence[0].evidence_type == "file"
+    assert inspection.evidence[0].patch_path == "output/patches/adapted-fix.patch"
     assert len(inspection.test_runs) == 1
     assert inspection.test_runs[0].result == "passed"
     assert inspection.human_review is not None
@@ -984,7 +985,8 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
         ).fetchone()
         evidence_rows = connection.execute(
             """
-            SELECT evidence_type, description, file_path, command, exit_code, log_path
+            SELECT evidence_type, description, file_path, command, exit_code, log_path,
+                   patch_path
             FROM evidence
             WHERE decision_id = ?
             ORDER BY id
@@ -1021,6 +1023,7 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
             None,
             None,
             None,
+            None,
         ),
         (
             "test_failure",
@@ -1029,6 +1032,7 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
             "mvn test",
             1,
             "output/logs/test-before-fix.log",
+            None,
         ),
         (
             "test_pass",
@@ -1037,6 +1041,7 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
             "mvn test",
             0,
             "output/logs/test-after-fix.log",
+            "output/patches/adapted-fix.patch",
         ),
     ]
     assert test_run_rows == [
@@ -1967,9 +1972,10 @@ def _insert_evidence(connection, *, decision_id: int) -> None:
             file_path,
             command,
             exit_code,
-            log_path
+            log_path,
+            patch_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             decision_id,
@@ -1979,6 +1985,7 @@ def _insert_evidence(connection, *, decision_id: int) -> None:
             "grep Hoodie",
             1,
             "workspace/tasks/pr-12345/output/logs/evidence.log",
+            "output/patches/adapted-fix.patch",
         ),
     )
 

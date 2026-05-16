@@ -158,6 +158,7 @@ def _render_evidence(console: Console, pull_request: InspectedPullRequest) -> No
     table.add_column("Command")
     table.add_column("Exit", justify="right", no_wrap=True)
     table.add_column("Log")
+    table.add_column("Patch")
 
     for evidence in pull_request.evidence:
         table.add_row(
@@ -167,6 +168,7 @@ def _render_evidence(console: Console, pull_request: InspectedPullRequest) -> No
             evidence.command or "-",
             _format_optional_int(evidence.exit_code),
             evidence.log_path or "-",
+            evidence.patch_path or "-",
         )
 
     console.print(table)
