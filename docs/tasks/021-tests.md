@@ -34,6 +34,19 @@ Build a reliable test suite for harness behavior without requiring real GitHub a
 - `tests/test_analysis_flow.py`
 - Other focused tests introduced by milestone work
 
+## Coverage Matrix
+
+| Area | Primary tests | Coverage notes |
+| --- | --- | --- |
+| Config | `tests/test_config.py` | Valid YAML, defaults, env-token loading, embedded-token rejection, and forbidden path overlap. |
+| Security boundary | `tests/test_security.py`, `tests/test_task_builder.py`, `tests/test_codex_runner.py` | Direct path validation, private-path exclusion from prompts, and GitHub credential stripping while preserving normal environment variables. |
+| Codex runner | `tests/test_codex_runner.py`, `tests/test_security.py` | Subprocess argv/cwd/env, stdout/stderr logs, JSONL session parsing, timeout process-group signaling, and credential stripping. |
+| Git and worktrees | `tests/test_git_runner.py`, `tests/test_repo_manager.py`, `tests/test_worktree_manager.py` | Mocked subprocess/Git calls for clone, fetch, detached worktree creation, safe stale replacement, pruning, fallback removal, and forbidden path rejection. |
+| GitHub scan and fake clients | `tests/fakes.py`, `tests/test_scan.py`, `tests/test_github_client.py` | Fake GitHub client coverage for scan persistence, branch selection, idempotent queue behavior, and failed scan audit rows without network or token access. |
+| Task bundle | `tests/test_task_builder.py` | Expected files, output directories, branch-specific instructions, public worktree references, and no private path strings. |
+| Analysis flow | `tests/test_analysis_flow.py`, `tests/test_analysis_runner.py`, `tests/test_storage.py` | Mocked Codex execution for lock-before-build behavior, success to reportable decision, timeout retry, non-zero exit logs, malformed/invalid result retry, and max-attempt failure. |
+| Result validation and storage | `tests/test_codex_result.py`, `tests/test_result_validator.py`, `tests/test_storage.py` | Strict result schema, decision-specific evidence, log/patch references, test-run persistence, retry/stale recovery, and reportable queue states. |
+
 ## Test Plan
 
 - Config tests cover valid YAML, defaults, env-token loading, embedded-token rejection, and forbidden path overlap.
@@ -46,4 +59,3 @@ Build a reliable test suite for harness behavior without requiring real GitHub a
 
 - Tests should be added with the milestone that introduces behavior.
 - This task coordinates test coverage expectations; it does not require all tests before the corresponding implementation exists.
-
