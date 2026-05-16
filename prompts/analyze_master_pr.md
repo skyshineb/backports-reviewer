@@ -25,6 +25,16 @@ Do not discard a master PR only because no regression test exists.
 Use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists but there is no test proof.
 Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.
 
+## Test Transplant Outcome Policy
+
+- No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.
+- Test not applicable to public OSS 0.15: use `INCONCLUSIVE`.
+- Transplanted test does not compile: use `INCONCLUSIVE`.
+- Transplanted test fails with the expected bug before fix: use `MASTER_REPRODUCED_ON_015`.
+- Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.
+- Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.
+- Transplanted test is flaky: use `INCONCLUSIVE`.
+
 ## Test Execution Limits
 
 Run the smallest focused command that can verify the behavior.
@@ -157,7 +167,7 @@ Decision-specific requirements:
 
 - `DIRECT_015_BUGFIX`: require `applicability.applies_to_oss_015: true` and `classification`, `code_presence`, or `logic_match` evidence showing this is a public OSS 0.15 bugfix candidate.
 - `MASTER_FIX_VERIFIED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, at least one `test_failure` evidence item, and at least one `test_pass` evidence item.
-- `MASTER_REPRODUCED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
+- `MASTER_REPRODUCED_ON_015`: require `test_transplant.attempted: true`, `test_transplant.result: applied` or `applied_and_compiled`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
 - `MASTER_POSSIBLY_APPLICABLE`: require `applicability.applies_to_oss_015: true` or null with a reason, plus `code_presence` or `logic_match` evidence.
 - `MASTER_NOT_APPLICABLE`: require `applicability.applies_to_oss_015: false` and `non_applicability` evidence for absent file, class, module, feature, bug introduction after 0.15, or fix behavior already present in public OSS 0.15.
 - `DISCARDED_NON_BUGFIX`, `DISCARDED_DOCS_ONLY`, `DISCARDED_CI_ONLY`, and `DISCARDED_RELEASE_ONLY`: require `classification` evidence.

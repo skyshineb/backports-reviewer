@@ -18,6 +18,16 @@ Do not discard a PR only because no regression test exists.
 Use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists but there is no test proof.
 Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.
 
+## Test Transplant Outcome Policy
+
+- No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.
+- Test not applicable to public OSS 0.15: use `INCONCLUSIVE`.
+- Transplanted test does not compile: use `INCONCLUSIVE`.
+- Transplanted test fails with the expected bug before fix: use `MASTER_REPRODUCED_ON_015`.
+- Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.
+- Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.
+- Transplanted test is flaky: use `INCONCLUSIVE`.
+
 ## Test Execution Limits
 
 Run the smallest focused command that can verify the behavior.
@@ -126,7 +136,7 @@ Use null only for fields that are explicitly unavailable because a test, transpl
 
 Decision-specific requirements:
 
-- `MASTER_REPRODUCED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
+- `MASTER_REPRODUCED_ON_015`: require `test_transplant.attempted: true`, `test_transplant.result: applied` or `applied_and_compiled`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
 - `MASTER_POSSIBLY_APPLICABLE`: require `applicability.applies_to_oss_015: true` or null with a reason, plus `code_presence` or `logic_match` evidence.
 - `INCONCLUSIVE` and `NEEDS_HUMAN_REVIEW`: require `uncertainty` evidence and a clear `applicability.reason`.
 - `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or required input file that identifies one of the failures allowed by the `FAILED_INFRA` policy.

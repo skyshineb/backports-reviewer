@@ -1058,6 +1058,103 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
     assert queue_status == ("REPORTABLE", None, None, None)
 
 
+def test_store_validated_decision_persists_before_fix_test_for_possible_result(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    init_database(sqlite_path)
+    result = parse_codex_result_json(
+        """
+        {
+          "schema_version": 1,
+          "pr_number": 12345,
+          "target_branch": "master",
+          "decision": "MASTER_POSSIBLY_APPLICABLE",
+          "confidence": "medium",
+          "bugfix_classification": "correctness_bugfix",
+          "summary": "Relevant public OSS 0.15 code exists, but the test passes before the fix.",
+          "human_action": "Review the public evidence before deciding whether to backport.",
+          "applicability": {
+            "applies_to_oss_015": true,
+            "reason": "The affected class and method exist in OSS 0.15.",
+            "affected_public_paths": [],
+            "missing_public_paths": []
+          },
+          "test_transplant": {
+            "attempted": true,
+            "result": "applied_and_compiled",
+            "notes": "Adapted imports."
+          },
+          "test_before_fix": {
+            "attempted": true,
+            "command": "mvn test",
+            "exit_code": 0,
+            "result": "passed",
+            "log_path": "output/logs/test-before-fix.log"
+          },
+          "fix_verification": {
+            "attempted": false,
+            "command": null,
+            "exit_code": null,
+            "result": null,
+            "patch_path": null,
+            "log_path": null
+          },
+          "evidence": [
+            {
+              "type": "code_presence",
+              "description": "Class Foo exists in OSS 0.15.",
+              "path": "hudi-client/src/main/java/example/Foo.java"
+            }
+          ]
+        }
+        """
+    )
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_saved_pr(
+            connection,
+            number=12345,
+            title="Analyze me",
+            branch="master",
+            merged_at="2024-01-01T00:00:00Z",
+            status="VALIDATED",
+            priority=20,
+        )
+        analysis_run_id = _insert_analysis_run(
+            connection,
+            pr_id=pr_id,
+            run_id="run-1",
+        )
+
+        store_validated_decision(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=analysis_run_id,
+            result=result,
+        )
+
+        test_run_rows = connection.execute(
+            """
+            SELECT phase, command, exit_code, result, log_path
+            FROM test_runs
+            WHERE analysis_run_id = ?
+            ORDER BY id
+            """,
+            (analysis_run_id,),
+        ).fetchall()
+
+    assert test_run_rows == [
+        (
+            "test_before_fix",
+            "mvn test",
+            0,
+            "passed",
+            "output/logs/test-before-fix.log",
+        )
+    ]
+
+
 def test_store_validated_decision_preserves_previous_decisions(
     tmp_path: Path,
 ) -> None:
