@@ -11,6 +11,7 @@ from backport_harness.codex_result import (
     Confidence,
     Decision,
     EvidenceType,
+    FixVerificationResult,
     TestResult as CodexTestResult,
     TransplantResult,
     load_codex_result,
@@ -307,6 +308,7 @@ def test_supported_test_transplant_results_parse(transplant_result: str) -> None
         "did_not_compile",
         "flaky",
         "timeout",
+        "infra_failed",
     ],
 )
 def test_supported_before_fix_test_results_parse(test_result: str) -> None:
@@ -316,6 +318,49 @@ def test_supported_before_fix_test_results_parse(test_result: str) -> None:
     result = parse_result(payload)
 
     assert result.test_before_fix.result is CodexTestResult(test_result)
+
+
+@pytest.mark.parametrize(
+    "fix_verification_result",
+    [
+        "passed_after_adapted_fix",
+        "failed_after_adapted_fix",
+        "patch_not_applicable",
+        "did_not_compile",
+        "flaky",
+        "timeout",
+        "infra_failed",
+    ],
+)
+def test_supported_fix_verification_results_parse(
+    fix_verification_result: str,
+) -> None:
+    payload = valid_result()
+    payload["fix_verification"]["result"] = fix_verification_result
+
+    result = parse_result(payload)
+
+    assert result.fix_verification.result is FixVerificationResult(
+        fix_verification_result
+    )
+
+
+@pytest.mark.parametrize(
+    ("section_name", "value"),
+    [
+        ("test_before_fix", "failed_to_start_maven_unavailable"),
+        ("fix_verification", "failed_to_start_maven_unavailable"),
+    ],
+)
+def test_ad_hoc_infra_result_values_fail_validation(
+    section_name: str,
+    value: str,
+) -> None:
+    payload = valid_result()
+    payload[section_name]["result"] = value
+
+    with pytest.raises(ValidationError, match=section_name):
+        parse_result(payload)
 
 
 def test_unknown_extra_fields_fail_validation() -> None:

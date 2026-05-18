@@ -82,6 +82,15 @@ STRUCTURED_CONTRACT_SNIPPETS = [
     "Patch paths must be under `output/patches/`.",
     "Use null only for fields that are explicitly unavailable",
 ]
+RESULT_VALUE_SNIPPETS = [
+    "Allowed result values:",
+    "`test_transplant.result`: `not_found`, `not_applicable`, `applied`, `applied_and_compiled`, `does_not_compile`, `failed`, `skipped`, or null.",
+    "`test_before_fix.result`: `not_run`, `passed`, `failed`, `failed_with_expected_error`, `failed_with_unrelated_error`, `did_not_compile`, `flaky`, `timeout`, `infra_failed`, or null.",
+    "`fix_verification.result`: `not_run`, `passed_after_adapted_fix`, `failed_after_adapted_fix`, `patch_not_applicable`, `did_not_compile`, `flaky`, `timeout`, `infra_failed`, or null.",
+    "Do not invent result values.",
+    "such as missing `mvn`, use `infra_failed`",
+    "`infra_failure` evidence",
+]
 NOTES_OUTPUT_SNIPPETS = [
     "Write human-readable notes only to `output/notes.md`.",
     "Do not write prose outside `output/codex_result.json` and `output/notes.md`.",
@@ -277,6 +286,14 @@ def test_prompts_define_structured_json_contract() -> None:
 
         for evidence_type in EVIDENCE_TYPES:
             assert evidence_type in content
+
+
+def test_prompts_define_exact_result_value_enums() -> None:
+    for prompt_file in PROMPT_FILES:
+        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+
+        for snippet in RESULT_VALUE_SNIPPETS:
+            assert snippet in content
 
 
 def test_prompts_define_narrow_failed_infra_policy() -> None:

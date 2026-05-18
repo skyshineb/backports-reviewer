@@ -123,6 +123,17 @@ The JSON object must include these top-level fields:
 - `patch_path`: relative path under `output/patches/` or null when no patch was written.
 - `log_path`: relative path under `output/logs/` or null when not run.
 
+Allowed result values:
+
+- `test_transplant.result`: `not_found`, `not_applicable`, `applied`, `applied_and_compiled`, `does_not_compile`, `failed`, `skipped`, or null.
+- `test_before_fix.result`: `not_run`, `passed`, `failed`, `failed_with_expected_error`, `failed_with_unrelated_error`, `did_not_compile`, `flaky`, `timeout`, `infra_failed`, or null.
+- `fix_verification.result`: `not_run`, `passed_after_adapted_fix`, `failed_after_adapted_fix`, `patch_not_applicable`, `did_not_compile`, `flaky`, `timeout`, `infra_failed`, or null.
+
+Do not invent result values. If a command cannot start because local tooling or
+test infrastructure is unavailable, such as missing `mvn`, use `infra_failed`,
+record the command, exit code, and log path when available, and add
+`infra_failure` evidence.
+
 `evidence` must be an array of objects. Each evidence object must include:
 
 - `type`: one of `code_presence`, `logic_match`, `test_failure`, `test_pass`, `non_applicability`, `classification`, `infra_failure`, or `uncertainty`.
