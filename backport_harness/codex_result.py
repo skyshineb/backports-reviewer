@@ -61,6 +61,7 @@ class TestResult(StrEnum):
     DID_NOT_COMPILE = "did_not_compile"
     FLAKY = "flaky"
     TIMEOUT = "timeout"
+    INFRA_FAILED = "infra_failed"
 
 
 class FixVerificationResult(StrEnum):
@@ -71,6 +72,7 @@ class FixVerificationResult(StrEnum):
     DID_NOT_COMPILE = "did_not_compile"
     FLAKY = "flaky"
     TIMEOUT = "timeout"
+    INFRA_FAILED = "infra_failed"
 
 
 class CodexResultModel(BaseModel):
