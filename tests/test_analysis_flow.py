@@ -59,7 +59,7 @@ def test_analysis_flow_locks_pr_before_task_build_and_stores_reportable_result(
     assert result.validation.valid is True
     assert final_queue_row == ("REPORTABLE", 1, None, None, None)
     assert run_row == ("VALIDATED", 0)
-    assert decision_row == ("MASTER_FIX_VERIFIED_ON_015", "very_high")
+    assert decision_row == ("SOURCE_FIX_VERIFIED_ON_TARGET", "very_high")
 
 
 def test_analysis_flow_timeout_marks_pr_retryable(

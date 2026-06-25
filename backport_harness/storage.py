@@ -23,6 +23,15 @@ from backport_harness.state_machine import (
 
 MIGRATIONS_PACKAGE = "backport_harness.migrations"
 MIGRATION_SUFFIX = ".sql"
+SCHEMA_REQUIRED_COLUMNS = {
+    "prs": {"upstream_branch"},
+    "decisions": {"applies_to_target_ref"},
+    "evidence": {"patch_path"},
+}
+SCHEMA_FORBIDDEN_COLUMNS = {
+    "prs": {"target_branch"},
+    "decisions": {"applies_to_oss_015"},
+}
 
 
 @dataclass(frozen=True)
@@ -30,7 +39,7 @@ class SavedPullRequest:
     github_pr_number: int
     github_pr_url: str
     title: str
-    target_branch: str
+    upstream_branch: str
     merged_at: str
     queue_status: str
     priority: int
@@ -42,7 +51,7 @@ class AnalysisCandidate:
     github_pr_number: int
     github_pr_url: str
     title: str
-    target_branch: str
+    upstream_branch: str
     merged_at: str
     queue_status: str
     priority: int
@@ -55,7 +64,7 @@ class AnalysisStart:
     pr_id: int
     analysis_run_id: int
     run_id: str
-    target_branch: str
+    upstream_branch: str
     attempts: int
 
 
@@ -63,7 +72,7 @@ class AnalysisStart:
 class RecoveredStaleRun:
     pr_id: int
     github_pr_number: int
-    target_branch: str
+    upstream_branch: str
     previous_locked_at: str
     previous_locked_by: str | None
     last_error: str
@@ -73,7 +82,7 @@ class RecoveredStaleRun:
 class RetriedPullRequest:
     pr_id: int
     github_pr_number: int
-    target_branch: str
+    upstream_branch: str
     previous_status: str
     attempts: int
     latest_decision: str | None
@@ -83,7 +92,7 @@ class RetriedPullRequest:
 class SkippedRetryPullRequest:
     pr_id: int | None
     github_pr_number: int
-    target_branch: str | None
+    upstream_branch: str | None
     status: str | None
     attempts: int | None
     latest_decision: str | None
@@ -138,7 +147,7 @@ class InspectedDecision:
     decision: str
     confidence: str
     bugfix_classification: str | None
-    applies_to_oss_015: bool | None
+    applies_to_target_ref: bool | None
     reason: str
     human_action: str | None
     created_at: str
@@ -182,7 +191,7 @@ class InspectedPullRequest:
     title: str
     body: str | None
     source_branch: str | None
-    target_branch: str
+    upstream_branch: str
     merged_commit_sha: str | None
     created_at: str | None
     updated_at: str | None
@@ -217,7 +226,7 @@ class ReportDecision:
     decision: str
     confidence: str
     bugfix_classification: str | None
-    applies_to_oss_015: bool | None
+    applies_to_target_ref: bool | None
     reason: str
     human_action: str | None
     created_at: str
@@ -238,7 +247,7 @@ class ReportPullRequest:
     github_pr_number: int
     github_pr_url: str
     title: str
-    target_branch: str
+    upstream_branch: str
     merged_at: str
     queue_status: str | None
     priority: int | None
@@ -289,6 +298,8 @@ def run_migrations(connection: sqlite3.Connection) -> None:
                 """,
                 (migration_name, _utc_now()),
             )
+
+    _validate_current_schema(connection)
 
 
 def create_scan_run(
@@ -342,7 +353,7 @@ def upsert_pull_request(
             title,
             body,
             source_branch,
-            target_branch,
+            upstream_branch,
             merged_commit_sha,
             created_at,
             updated_at,
@@ -353,7 +364,7 @@ def upsert_pull_request(
             updated_in_db_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(github_pr_number, target_branch) DO UPDATE SET
+        ON CONFLICT(github_pr_number, upstream_branch) DO UPDATE SET
             github_pr_url = excluded.github_pr_url,
             title = excluded.title,
             body = excluded.body,
@@ -387,7 +398,7 @@ def upsert_pull_request(
         """
         SELECT id
         FROM prs
-        WHERE github_pr_number = ? AND target_branch = ?
+        WHERE github_pr_number = ? AND upstream_branch = ?
         """,
         (pull_request.number, pull_request.base_ref),
     )
@@ -434,11 +445,16 @@ def create_analysis_queue_row_if_missing(
     connection: sqlite3.Connection,
     pr_id: int,
     *,
-    target_branch: str,
+    upstream_branch: str,
     title: str,
+    target_ref_label: str | None = None,
 ) -> None:
     now = _utc_now()
-    priority = assign_initial_priority(target_branch=target_branch, title=title)
+    priority = assign_initial_priority(
+        upstream_branch=upstream_branch,
+        title=title,
+        target_ref_label=target_ref_label,
+    )
     connection.execute(
         """
         INSERT OR IGNORE INTO analysis_queue(
@@ -484,7 +500,7 @@ def select_analysis_candidates(
             prs.github_pr_number,
             prs.github_pr_url,
             prs.title,
-            prs.target_branch,
+            prs.upstream_branch,
             prs.merged_at,
             analysis_queue.status,
             analysis_queue.priority,
@@ -507,7 +523,7 @@ def select_analysis_candidates(
             github_pr_number=int(row[0]),
             github_pr_url=str(row[1]),
             title=str(row[2]),
-            target_branch=str(row[3]),
+            upstream_branch=str(row[3]),
             merged_at=str(row[4]),
             queue_status=str(row[5]),
             priority=int(row[6]),
@@ -529,11 +545,11 @@ def start_analysis_run(
     now = _utc_now()
     row = connection.execute(
         """
-        SELECT prs.id, prs.target_branch, analysis_queue.status, analysis_queue.attempts
+        SELECT prs.id, prs.upstream_branch, analysis_queue.status, analysis_queue.attempts
         FROM prs
         JOIN analysis_queue ON analysis_queue.pr_id = prs.id
         WHERE prs.github_pr_number = ?
-        ORDER BY prs.target_branch ASC
+        ORDER BY prs.upstream_branch ASC
         LIMIT 1
         """,
         (pr_number,),
@@ -542,7 +558,7 @@ def start_analysis_run(
         raise ValueError(f"No queued saved PR found for #{pr_number}.")
 
     pr_id = int(row[0])
-    target_branch = str(row[1])
+    upstream_branch = str(row[1])
     status = str(row[2])
     attempts = int(row[3]) + 1
     if status not in RETRYABLE_QUEUE_STATUSES:
@@ -578,7 +594,7 @@ def start_analysis_run(
         pr_id=pr_id,
         analysis_run_id=int(cursor.lastrowid),
         run_id=run_id,
-        target_branch=target_branch,
+        upstream_branch=upstream_branch,
         attempts=attempts,
     )
 
@@ -720,7 +736,7 @@ def recover_stale_runs(
         SELECT
             analysis_queue.pr_id,
             prs.github_pr_number,
-            prs.target_branch,
+            prs.upstream_branch,
             analysis_queue.locked_at,
             analysis_queue.locked_by
         FROM analysis_queue
@@ -737,7 +753,7 @@ def recover_stale_runs(
         RecoveredStaleRun(
             pr_id=int(row[0]),
             github_pr_number=int(row[1]),
-            target_branch=str(row[2]),
+            upstream_branch=str(row[2]),
             previous_locked_at=str(row[3]),
             previous_locked_by=row[4],
             last_error=(
@@ -836,7 +852,7 @@ def store_validated_decision(
             decision,
             confidence,
             bugfix_classification,
-            applies_to_oss_015,
+            applies_to_target_ref,
             reason,
             human_action,
             created_at
@@ -849,7 +865,7 @@ def store_validated_decision(
             result.decision.value,
             result.confidence.value,
             result.bugfix_classification,
-            _optional_bool_to_int(result.applicability.applies_to_oss_015),
+            _optional_bool_to_int(result.applicability.applies_to_target_ref),
             result.applicability.reason,
             result.human_action,
             now,
@@ -941,7 +957,7 @@ def store_human_review(
         SELECT id
         FROM prs
         WHERE github_pr_number = ?
-        ORDER BY target_branch ASC
+        ORDER BY upstream_branch ASC
         LIMIT 1
         """,
         (pr_number,),
@@ -969,7 +985,7 @@ def queue_status_for_decision(decision: Decision) -> str:
     if decision is Decision.FAILED_INFRA:
         return QUEUE_STATUS_FAILED_INFRA
     if decision in {
-        Decision.MASTER_NOT_APPLICABLE,
+        Decision.SOURCE_NOT_APPLICABLE,
         Decision.DISCARDED_NON_BUGFIX,
         Decision.DISCARDED_DOCS_ONLY,
         Decision.DISCARDED_CI_ONLY,
@@ -993,7 +1009,7 @@ def list_saved_pull_requests(
     parameters: list[object] = []
 
     if branch is not None:
-        where_clauses.append("prs.target_branch = ?")
+        where_clauses.append("prs.upstream_branch = ?")
         parameters.append(branch)
 
     if status is not None:
@@ -1014,7 +1030,7 @@ def list_saved_pull_requests(
 
     order_sql = {
         "merged-at": "prs.merged_at ASC",
-        "branch": "prs.target_branch ASC, prs.merged_at ASC",
+        "branch": "prs.upstream_branch ASC, prs.merged_at ASC",
         "priority": "analysis_queue.priority ASC, prs.merged_at ASC",
         "status": "analysis_queue.status ASC, prs.merged_at ASC",
     }[order_by]
@@ -1044,7 +1060,7 @@ def list_saved_pull_requests(
             prs.github_pr_number,
             prs.github_pr_url,
             prs.title,
-            prs.target_branch,
+            prs.upstream_branch,
             prs.merged_at,
             analysis_queue.status,
             analysis_queue.priority,
@@ -1064,7 +1080,7 @@ def list_saved_pull_requests(
             github_pr_number=int(row[0]),
             github_pr_url=str(row[1]),
             title=str(row[2]),
-            target_branch=str(row[3]),
+            upstream_branch=str(row[3]),
             merged_at=str(row[4]),
             queue_status=str(row[5]),
             priority=int(row[6]),
@@ -1088,7 +1104,7 @@ def get_pull_request_inspection(
             prs.title,
             prs.body,
             prs.source_branch,
-            prs.target_branch,
+            prs.upstream_branch,
             prs.merged_commit_sha,
             prs.created_at,
             prs.updated_at,
@@ -1105,7 +1121,7 @@ def get_pull_request_inspection(
         FROM prs
         LEFT JOIN analysis_queue ON analysis_queue.pr_id = prs.id
         WHERE prs.github_pr_number = ?
-        ORDER BY prs.target_branch ASC
+        ORDER BY prs.upstream_branch ASC
         LIMIT 1
         """,
         (pr_number,),
@@ -1152,7 +1168,7 @@ def get_pull_request_inspection(
         title=str(pr_row[3]),
         body=pr_row[4],
         source_branch=pr_row[5],
-        target_branch=str(pr_row[6]),
+        upstream_branch=str(pr_row[6]),
         merged_commit_sha=pr_row[7],
         created_at=pr_row[8],
         updated_at=pr_row[9],
@@ -1198,7 +1214,7 @@ def get_report_pull_requests(connection: sqlite3.Connection) -> list[ReportPullR
             prs.github_pr_number,
             prs.github_pr_url,
             prs.title,
-            prs.target_branch,
+            prs.upstream_branch,
             prs.merged_at,
             analysis_queue.status,
             analysis_queue.priority,
@@ -1210,7 +1226,7 @@ def get_report_pull_requests(connection: sqlite3.Connection) -> list[ReportPullR
         FROM prs
         LEFT JOIN analysis_queue ON analysis_queue.pr_id = prs.id
         LEFT JOIN latest_human_reviews ON latest_human_reviews.pr_id = prs.id
-        ORDER BY prs.target_branch ASC, prs.merged_at ASC, prs.github_pr_number ASC
+        ORDER BY prs.upstream_branch ASC, prs.merged_at ASC, prs.github_pr_number ASC
         """
     ).fetchall()
 
@@ -1220,7 +1236,7 @@ def get_report_pull_requests(connection: sqlite3.Connection) -> list[ReportPullR
             github_pr_number=int(row[1]),
             github_pr_url=str(row[2]),
             title=str(row[3]),
-            target_branch=str(row[4]),
+            upstream_branch=str(row[4]),
             merged_at=str(row[5]),
             queue_status=row[6],
             priority=row[7],
@@ -1253,7 +1269,7 @@ def get_report_decisions_by_pr(
             decisions.decision,
             decisions.confidence,
             decisions.bugfix_classification,
-            decisions.applies_to_oss_015,
+            decisions.applies_to_target_ref,
             decisions.reason,
             decisions.human_action,
             decisions.created_at
@@ -1266,9 +1282,9 @@ def get_report_decisions_by_pr(
     evidence_by_decision = _get_report_evidence_by_decision(connection)
     decisions_by_pr: dict[int, list[ReportDecision]] = {}
     for row in rows:
-        applies_to_oss_015 = None
+        applies_to_target_ref = None
         if row[7] is not None:
-            applies_to_oss_015 = bool(row[7])
+            applies_to_target_ref = bool(row[7])
 
         pr_id = int(row[1])
         decision = ReportDecision(
@@ -1278,7 +1294,7 @@ def get_report_decisions_by_pr(
             decision=str(row[4]),
             confidence=str(row[5]),
             bugfix_classification=row[6],
-            applies_to_oss_015=applies_to_oss_015,
+            applies_to_target_ref=applies_to_target_ref,
             reason=str(row[8]),
             human_action=row[9],
             created_at=str(row[10]),
@@ -1301,7 +1317,7 @@ def get_report_data(connection: sqlite3.Connection) -> list[ReportPullRequest]:
                 github_pr_number=pull_request.github_pr_number,
                 github_pr_url=pull_request.github_pr_url,
                 title=pull_request.title,
-                target_branch=pull_request.target_branch,
+                upstream_branch=pull_request.upstream_branch,
                 merged_at=pull_request.merged_at,
                 queue_status=pull_request.queue_status,
                 priority=pull_request.priority,
@@ -1371,7 +1387,7 @@ def _retry_pull_request_by_number(
         SELECT
             prs.id,
             prs.github_pr_number,
-            prs.target_branch,
+            prs.upstream_branch,
             analysis_queue.status,
             analysis_queue.attempts,
             latest_decisions.decision
@@ -1379,7 +1395,7 @@ def _retry_pull_request_by_number(
         JOIN analysis_queue ON analysis_queue.pr_id = prs.id
         LEFT JOIN latest_decisions ON latest_decisions.pr_id = prs.id
         WHERE prs.github_pr_number = ?
-        ORDER BY prs.target_branch ASC
+        ORDER BY prs.upstream_branch ASC
         LIMIT 1
         """,
         (pr_number,),
@@ -1392,7 +1408,7 @@ def _retry_pull_request_by_number(
                 SkippedRetryPullRequest(
                     pr_id=None,
                     github_pr_number=pr_number,
-                    target_branch=None,
+                    upstream_branch=None,
                     status=None,
                     attempts=None,
                     latest_decision=None,
@@ -1415,7 +1431,7 @@ def _retry_pull_request_by_number(
             RetriedPullRequest(
                 pr_id=retry_row.pr_id,
                 github_pr_number=retry_row.github_pr_number,
-                target_branch=retry_row.target_branch,
+                upstream_branch=retry_row.upstream_branch,
                 previous_status=retry_row.status,
                 attempts=retry_row.attempts,
                 latest_decision=retry_row.latest_decision,
@@ -1451,7 +1467,7 @@ def _retry_pull_requests_by_status(
         SELECT
             prs.id,
             prs.github_pr_number,
-            prs.target_branch,
+            prs.upstream_branch,
             analysis_queue.status,
             analysis_queue.attempts,
             latest_decisions.decision
@@ -1487,7 +1503,7 @@ def _retry_pull_requests_by_status(
         SELECT
             prs.id,
             prs.github_pr_number,
-            prs.target_branch,
+            prs.upstream_branch,
             analysis_queue.status,
             analysis_queue.attempts,
             latest_decisions.decision
@@ -1509,7 +1525,7 @@ def _retry_pull_requests_by_status(
         RetriedPullRequest(
             pr_id=row.pr_id,
             github_pr_number=row.github_pr_number,
-            target_branch=row.target_branch,
+            upstream_branch=row.upstream_branch,
             previous_status=row.status,
             attempts=row.attempts,
             latest_decision=row.latest_decision,
@@ -1531,7 +1547,7 @@ def _retry_pull_requests_by_status(
 class _RetryRow:
     pr_id: int
     github_pr_number: int
-    target_branch: str
+    upstream_branch: str
     status: str
     attempts: int
     latest_decision: str | None
@@ -1541,7 +1557,7 @@ def _retry_row_from_sql(row: sqlite3.Row | tuple[object, ...]) -> _RetryRow:
     return _RetryRow(
         pr_id=int(row[0]),
         github_pr_number=int(row[1]),
-        target_branch=str(row[2]),
+        upstream_branch=str(row[2]),
         status=str(row[3]),
         attempts=int(row[4]),
         latest_decision=row[5],
@@ -1564,7 +1580,7 @@ def _skipped_retry_pull_request(row: _RetryRow, reason: str) -> SkippedRetryPull
     return SkippedRetryPullRequest(
         pr_id=row.pr_id,
         github_pr_number=row.github_pr_number,
-        target_branch=row.target_branch,
+        upstream_branch=row.upstream_branch,
         status=row.status,
         attempts=row.attempts,
         latest_decision=row.latest_decision,
@@ -1622,6 +1638,37 @@ def _load_migrations() -> list[tuple[str, str]]:
         (migration_file.name, migration_file.read_text(encoding="utf-8"))
         for migration_file in migration_files
     ]
+
+
+def _validate_current_schema(connection: sqlite3.Connection) -> None:
+    for table_name, required_columns in SCHEMA_REQUIRED_COLUMNS.items():
+        columns = _table_columns(connection, table_name)
+        missing_columns = sorted(required_columns - columns)
+        if missing_columns:
+            joined_columns = ", ".join(missing_columns)
+            raise RuntimeError(
+                "SQLite schema is not compatible with release 0.1; "
+                f"table '{table_name}' is missing column(s): {joined_columns}. "
+                "Use a fresh database or recreate this SQLite file from public "
+                "source data."
+            )
+
+    for table_name, forbidden_columns in SCHEMA_FORBIDDEN_COLUMNS.items():
+        columns = _table_columns(connection, table_name)
+        stale_columns = sorted(forbidden_columns & columns)
+        if stale_columns:
+            joined_columns = ", ".join(stale_columns)
+            raise RuntimeError(
+                "SQLite schema is not compatible with release 0.1; "
+                f"table '{table_name}' contains pre-0.1 column(s): "
+                f"{joined_columns}. Use a fresh database or recreate this "
+                "SQLite file from public source data."
+            )
+
+
+def _table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
 
 
 def _utc_now() -> str:
@@ -1758,7 +1805,7 @@ def _get_latest_inspected_decision(
             decisions.decision,
             decisions.confidence,
             decisions.bugfix_classification,
-            decisions.applies_to_oss_015,
+            decisions.applies_to_target_ref,
             decisions.reason,
             decisions.human_action,
             decisions.created_at,
@@ -1784,9 +1831,9 @@ def _get_latest_inspected_decision(
     if row is None:
         return None
 
-    applies_to_oss_015 = None
+    applies_to_target_ref = None
     if row[4] is not None:
-        applies_to_oss_015 = bool(row[4])
+        applies_to_target_ref = bool(row[4])
 
     return _LatestDecisionWithRunId(
         analysis_run_id=int(row[0]),
@@ -1794,7 +1841,7 @@ def _get_latest_inspected_decision(
             decision=str(row[1]),
             confidence=str(row[2]),
             bugfix_classification=row[3],
-            applies_to_oss_015=applies_to_oss_015,
+            applies_to_target_ref=applies_to_target_ref,
             reason=str(row[5]),
             human_action=row[6],
             created_at=str(row[7]),

@@ -49,22 +49,26 @@ Do not put token values in `config.yaml`.
 
 ## Configuration
 
-The default `config.yaml` is a public-upstream example. Adjust it for the public
-repository and branches you want to review.
+The root `config.yaml` is an editable generic template. Copy or adjust it for
+the public repository, source branches, and target ref you want to review.
+Concrete examples are available in `examples/config.lance-v7.yaml` and
+`examples/config.hudi.yaml`.
 
 Important sections:
 
-- `github`: public upstream owner, repo, branches, token environment variable,
-  request delays, retry settings, and rate-limit handling.
-- `local_repo`: public upstream clone location and public worktree directory.
+- `github`: public upstream owner, repo, source branches, optional branch-to-Git
+  ref mapping, token environment variable, request delays, retry settings, and
+  rate-limit handling.
+- `local_repo`: public upstream clone location, public worktree directory, and
+  required `target_ref` (`label`, Git `ref`, and worktree suffix).
 - `codex`: Codex command, timeout, max attempts, and expected result path.
 - `analysis`: default dry-run selection limit and stale-run timeout.
 - `reports`: output directory for generated reports.
 - `storage`: SQLite database path.
 - `security`: optional forbidden private path prefixes.
 
-The default workspace is under `workspace/`; reports are written under
-`reports/`.
+By default, generated workspace state is written under `workspace/default/` and
+reports under `reports/default/`. Both directories are ignored by Git.
 
 ## Workflow
 
@@ -72,7 +76,7 @@ All commands accept `--config config.yaml`; it defaults to `config.yaml`.
 
 ```sh
 .venv/bin/backport-harness --config config.yaml db init
-.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch main
 .venv/bin/backport-harness --config config.yaml list-prs --limit 20
 .venv/bin/backport-harness --config config.yaml inspect --pr 12345
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
@@ -97,7 +101,7 @@ Scan public upstream PRs merged in an inclusive `merged_at` date range:
 ```sh
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31
-.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch main
 ```
 
 If `--branch` is omitted, every branch listed in `github.branches` is scanned.
@@ -170,6 +174,9 @@ Generated report files:
 ## Troubleshooting
 
 - Empty list output: run `db init` and `scan`, then verify `storage.sqlite_path`.
+- Incompatible SQLite schema: release 0.1 treats the schema as the first public
+  baseline. Point `storage.sqlite_path` at a fresh database or recreate it from
+  public source data.
 - GitHub rate limits: set `GITHUB_TOKEN`, keep delays enabled, and rerun the
   scan. Scans are idempotent.
 - Stuck `CODEX_RUNNING`: run `recover-stale`, then retry selected PRs.

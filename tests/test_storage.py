@@ -72,7 +72,41 @@ def test_init_database_can_be_rerun_safely(tmp_path: Path) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
 
-    assert rows == [("001_initial.sql",), ("002_evidence_patch_path.sql",)]
+    assert rows == [("001_initial.sql",)]
+
+
+def test_init_database_rejects_pre_0_1_schema(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with connect(sqlite_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            INSERT INTO schema_migrations(version, applied_at)
+            VALUES ('001_initial.sql', '2024-01-01T00:00:00Z');
+
+            CREATE TABLE prs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                github_pr_number INTEGER NOT NULL,
+                target_branch TEXT NOT NULL
+            );
+            CREATE TABLE decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                applies_to_oss_015 INTEGER
+            );
+            CREATE TABLE evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_path TEXT
+            );
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="not compatible with release 0.1"):
+        init_database(sqlite_path)
 
 
 def test_connect_enables_foreign_keys(tmp_path: Path) -> None:
@@ -214,13 +248,13 @@ def test_list_saved_pull_requests_returns_latest_decision(tmp_path: Path) -> Non
             connection,
             pr_id=pr_id,
             analysis_run_id=second_run_id,
-            decision="MASTER_NOT_APPLICABLE",
+            decision="SOURCE_NOT_APPLICABLE",
             created_at="2024-01-02T02:00:00Z",
         )
 
         rows = list_saved_pull_requests(connection)
 
-    assert rows[0].latest_decision == "MASTER_NOT_APPLICABLE"
+    assert rows[0].latest_decision == "SOURCE_NOT_APPLICABLE"
 
 
 def test_get_pull_request_inspection_returns_none_for_missing_pr(
@@ -314,7 +348,7 @@ def test_get_pull_request_inspection_returns_post_analysis_details(
             connection,
             pr_id=pr_id,
             analysis_run_id=second_run_id,
-            decision="MASTER_NOT_APPLICABLE",
+            decision="SOURCE_NOT_APPLICABLE",
             created_at="2024-01-02T02:00:00Z",
         )
         _insert_evidence(connection, decision_id=latest_decision_id)
@@ -325,7 +359,7 @@ def test_get_pull_request_inspection_returns_post_analysis_details(
 
     assert inspection is not None
     assert inspection.latest_decision is not None
-    assert inspection.latest_decision.decision == "MASTER_NOT_APPLICABLE"
+    assert inspection.latest_decision.decision == "SOURCE_NOT_APPLICABLE"
     assert inspection.latest_analysis_run is not None
     assert inspection.latest_analysis_run.run_id == "run-2"
     assert inspection.latest_decision.analysis_run.run_id == "run-2"
@@ -491,13 +525,14 @@ def test_create_analysis_queue_row_assigns_computed_priority(
         create_analysis_queue_row_if_missing(
             connection,
             direct_pr_id,
-            target_branch="0.15",
+            upstream_branch="0.15",
             title="Add release fix",
+            target_ref_label="0.15",
         )
         create_analysis_queue_row_if_missing(
             connection,
             bugfix_pr_id,
-            target_branch="master",
+            upstream_branch="master",
             title="Fix NPE in compaction",
         )
 
@@ -532,7 +567,7 @@ def test_create_analysis_queue_row_does_not_overwrite_existing_queue_state(
         create_analysis_queue_row_if_missing(
             connection,
             pr_id,
-            target_branch="0.15",
+            upstream_branch="0.15",
             title="Fix important bug",
         )
 
@@ -976,7 +1011,7 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
 
         decision_row = connection.execute(
             """
-            SELECT decision, confidence, bugfix_classification, applies_to_oss_015,
+            SELECT decision, confidence, bugfix_classification, applies_to_target_ref,
                    reason, human_action
             FROM decisions
             WHERE id = ?
@@ -1008,7 +1043,7 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
         ).fetchone()
 
     assert decision_row == (
-        "MASTER_FIX_VERIFIED_ON_015",
+        "SOURCE_FIX_VERIFIED_ON_TARGET",
         "very_high",
         "correctness_bugfix",
         1,
@@ -1071,16 +1106,16 @@ def test_store_validated_decision_persists_before_fix_test_for_possible_result(
     result = parse_codex_result_json(
         """
         {
-          "schema_version": 1,
+          "schema_version": 2,
           "pr_number": 12345,
-          "target_branch": "master",
-          "decision": "MASTER_POSSIBLY_APPLICABLE",
+          "upstream_branch": "master",
+          "decision": "SOURCE_POSSIBLY_APPLICABLE",
           "confidence": "medium",
           "bugfix_classification": "correctness_bugfix",
           "summary": "Relevant public OSS 0.15 code exists, but the test passes before the fix.",
           "human_action": "Review the public evidence before deciding whether to backport.",
           "applicability": {
-            "applies_to_oss_015": true,
+            "applies_to_target_ref": true,
             "reason": "The affected class and method exist in OSS 0.15.",
             "affected_public_paths": [],
             "missing_public_paths": []
@@ -1190,7 +1225,7 @@ def test_store_validated_decision_preserves_previous_decisions(
             connection,
             pr_id=pr_id,
             analysis_run_id=second_run_id,
-            result=_valid_codex_result(decision="MASTER_NOT_APPLICABLE"),
+            result=_valid_codex_result(decision="SOURCE_NOT_APPLICABLE"),
         )
 
         decision_rows = connection.execute(
@@ -1207,24 +1242,24 @@ def test_store_validated_decision_preserves_previous_decisions(
 
     assert decision_rows == [
         (first_run_id, "INCONCLUSIVE"),
-        (second_run_id, "MASTER_NOT_APPLICABLE"),
+        (second_run_id, "SOURCE_NOT_APPLICABLE"),
     ]
-    assert listed[0].latest_decision == "MASTER_NOT_APPLICABLE"
+    assert listed[0].latest_decision == "SOURCE_NOT_APPLICABLE"
     assert inspected is not None
     assert inspected.latest_decision is not None
-    assert inspected.latest_decision.decision == "MASTER_NOT_APPLICABLE"
+    assert inspected.latest_decision.decision == "SOURCE_NOT_APPLICABLE"
 
 
 @pytest.mark.parametrize(
     ("decision", "queue_status"),
     [
-        (Decision.DIRECT_015_BUGFIX, "REPORTABLE"),
-        (Decision.MASTER_POSSIBLY_APPLICABLE, "REPORTABLE"),
-        (Decision.MASTER_REPRODUCED_ON_015, "REPORTABLE"),
-        (Decision.MASTER_FIX_VERIFIED_ON_015, "REPORTABLE"),
+        (Decision.TARGET_BRANCH_BUGFIX, "REPORTABLE"),
+        (Decision.SOURCE_POSSIBLY_APPLICABLE, "REPORTABLE"),
+        (Decision.SOURCE_REPRODUCED_ON_TARGET, "REPORTABLE"),
+        (Decision.SOURCE_FIX_VERIFIED_ON_TARGET, "REPORTABLE"),
         (Decision.INCONCLUSIVE, "REPORTABLE"),
         (Decision.NEEDS_HUMAN_REVIEW, "REPORTABLE"),
-        (Decision.MASTER_NOT_APPLICABLE, "DONE"),
+        (Decision.SOURCE_NOT_APPLICABLE, "DONE"),
         (Decision.DISCARDED_NON_BUGFIX, "DONE"),
         (Decision.DISCARDED_DOCS_ONLY, "DONE"),
         (Decision.DISCARDED_CI_ONLY, "DONE"),
@@ -1704,20 +1739,20 @@ def test_retry_pull_request_by_pr_skips_running_rows(tmp_path: Path) -> None:
     assert row == ("CODEX_RUNNING",)
 
 
-def _valid_codex_result(*, decision: str = "MASTER_FIX_VERIFIED_ON_015"):
+def _valid_codex_result(*, decision: str = "SOURCE_FIX_VERIFIED_ON_TARGET"):
     return parse_codex_result_json(
         """
         {
-          "schema_version": 1,
+          "schema_version": 2,
           "pr_number": 12345,
-          "target_branch": "master",
+          "upstream_branch": "master",
           "decision": "%s",
           "confidence": "very_high",
           "bugfix_classification": "correctness_bugfix",
           "summary": "Fixes null handling in compaction scheduling.",
           "human_action": "Review adapted patch and backport if appropriate.",
           "applicability": {
-            "applies_to_oss_015": true,
+            "applies_to_target_ref": true,
             "reason": "The affected class and method exist in OSS 0.15.",
             "affected_public_paths": [],
             "missing_public_paths": []
@@ -1786,7 +1821,7 @@ def _insert_saved_pr(
             github_pr_number,
             github_pr_url,
             title,
-            target_branch,
+            upstream_branch,
             merged_at,
             created_in_db_at,
             updated_in_db_at
@@ -1842,7 +1877,7 @@ def _insert_pr_without_queue(
             github_pr_number,
             github_pr_url,
             title,
-            target_branch,
+            upstream_branch,
             merged_at,
             created_in_db_at,
             updated_in_db_at

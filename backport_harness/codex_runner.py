@@ -30,6 +30,7 @@ class CodexRunRequest:
     command: str = "codex"
     extra_env: dict[str, str] = field(default_factory=dict)
     github_token_env: str | None = None
+    reasoning_effort: str = "medium"
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,8 @@ def run_codex(request: CodexRunRequest) -> CodexRunResult:
                 "--json",
                 "-o",
                 str(temp_last_message_path),
+                "-c",
+                f'model_reasoning_effort="{request.reasoning_effort}"',
                 request.prompt,
             ],
             cwd=request.cwd,

@@ -14,6 +14,7 @@ from backport_harness.config import (
     ReportsConfig,
     SecurityConfig,
     StorageConfig,
+    TargetRefConfig,
 )
 from backport_harness.github_client import GitHubChangedFile, GitHubPullRequest
 from backport_harness.storage import connect
@@ -91,6 +92,11 @@ def make_config(
             upstream_url="https://github.com/apache/hudi.git",
             repo_dir=tmp_path / "workspace" / "upstream",
             worktree_dir=tmp_path / "workspace" / "worktrees",
+            target_ref=TargetRefConfig(
+                label="0.15",
+                ref="origin/release-0.15.0",
+                worktree_suffix="015",
+            ),
         ),
         codex=CodexConfig(
             command="codex",
@@ -154,7 +160,7 @@ def insert_saved_pr(
             github_pr_number,
             github_pr_url,
             title,
-            target_branch,
+            upstream_branch,
             merged_commit_sha,
             merged_at,
             created_in_db_at,
@@ -262,15 +268,15 @@ def write_valid_codex_result(task_dir: Path, *, pr_number: int = 12345) -> None:
     (task_dir / "output" / "codex_result.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "pr_number": pr_number,
-                "target_branch": "master",
-                "decision": "MASTER_FIX_VERIFIED_ON_015",
+                "upstream_branch": "master",
+                "decision": "SOURCE_FIX_VERIFIED_ON_TARGET",
                 "confidence": "very_high",
                 "summary": "Fixes null handling in compaction scheduling.",
                 "human_action": "Review adapted patch and backport if appropriate.",
                 "applicability": {
-                    "applies_to_oss_015": True,
+                    "applies_to_target_ref": True,
                     "reason": "The affected class and method exist in OSS 0.15.",
                     "affected_public_paths": [
                         "hudi-client/src/main/java/example/Foo.java",

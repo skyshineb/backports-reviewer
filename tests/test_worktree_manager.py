@@ -6,14 +6,11 @@ import pytest
 from backport_harness.config import TargetRefConfig
 from backport_harness.git_runner import GitCommandError, GitResult
 from backport_harness.security import SecurityError
-from backport_harness.worktree_manager import (
-    prepare_oss_015_worktree,
-    prepare_target_worktree,
-)
+from backport_harness.worktree_manager import prepare_target_worktree
 from tests.test_repo_manager import make_config
 
 
-def test_prepare_oss_015_worktree_creates_detached_worktree(
+def test_prepare_target_worktree_creates_detached_worktree(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -31,7 +28,7 @@ def test_prepare_oss_015_worktree_creates_detached_worktree(
 
     monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
 
-    target = prepare_oss_015_worktree(config, pr_number=12345)
+    target = prepare_target_worktree(config, pr_number=12345)
 
     assert target == config.local_repo.worktree_dir / "pr-12345-015"
     assert calls == [
@@ -96,7 +93,7 @@ def test_prepare_target_worktree_uses_configured_target_ref(
     ]
 
 
-def test_prepare_oss_015_worktree_removes_safe_stale_target(
+def test_prepare_target_worktree_removes_safe_stale_target(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -116,7 +113,7 @@ def test_prepare_oss_015_worktree_removes_safe_stale_target(
 
     monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
 
-    prepare_oss_015_worktree(config, pr_number=12345)
+    prepare_target_worktree(config, pr_number=12345)
 
     assert calls == [
         ["git", "-C", str(config.local_repo.repo_dir), "worktree", "prune"],
@@ -142,7 +139,7 @@ def test_prepare_oss_015_worktree_removes_safe_stale_target(
     ]
 
 
-def test_prepare_oss_015_worktree_prunes_missing_registered_worktree(
+def test_prepare_target_worktree_prunes_missing_registered_worktree(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -161,7 +158,7 @@ def test_prepare_oss_015_worktree_prunes_missing_registered_worktree(
 
     monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
 
-    prepare_oss_015_worktree(config, pr_number=12345)
+    prepare_target_worktree(config, pr_number=12345)
 
     assert not target.exists()
     assert calls == [
@@ -179,7 +176,7 @@ def test_prepare_oss_015_worktree_prunes_missing_registered_worktree(
     ]
 
 
-def test_prepare_oss_015_worktree_falls_back_to_rmtree_for_unregistered_target(
+def test_prepare_target_worktree_falls_back_to_rmtree_for_unregistered_target(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -204,12 +201,12 @@ def test_prepare_oss_015_worktree_falls_back_to_rmtree_for_unregistered_target(
 
     monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
 
-    prepare_oss_015_worktree(config, pr_number=12345)
+    prepare_target_worktree(config, pr_number=12345)
 
     assert removed == [target]
 
 
-def test_prepare_oss_015_worktree_rejects_forbidden_worktree_path(
+def test_prepare_target_worktree_rejects_forbidden_worktree_path(
     tmp_path: Path,
 ) -> None:
     config = make_config(
@@ -218,10 +215,10 @@ def test_prepare_oss_015_worktree_rejects_forbidden_worktree_path(
     )
 
     with pytest.raises(SecurityError, match="forbidden private prefix"):
-        prepare_oss_015_worktree(config, pr_number=12345)
+        prepare_target_worktree(config, pr_number=12345)
 
 
-def test_prepare_oss_015_worktree_rejects_repo_overlap(tmp_path: Path) -> None:
+def test_prepare_target_worktree_rejects_repo_overlap(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     overlapping_config = make_config(tmp_path)
     object.__setattr__(
@@ -231,11 +228,11 @@ def test_prepare_oss_015_worktree_rejects_repo_overlap(tmp_path: Path) -> None:
     )
 
     with pytest.raises(SecurityError, match="overlaps upstream repo"):
-        prepare_oss_015_worktree(overlapping_config, pr_number=12345)
+        prepare_target_worktree(overlapping_config, pr_number=12345)
 
 
-def test_prepare_oss_015_worktree_rejects_invalid_pr_number(tmp_path: Path) -> None:
+def test_prepare_target_worktree_rejects_invalid_pr_number(tmp_path: Path) -> None:
     config = make_config(tmp_path)
 
     with pytest.raises(ValueError, match="positive integer"):
-        prepare_oss_015_worktree(config, pr_number=0)
+        prepare_target_worktree(config, pr_number=0)

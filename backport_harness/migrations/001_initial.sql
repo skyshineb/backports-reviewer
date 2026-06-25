@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS prs (
     title TEXT NOT NULL,
     body TEXT,
     source_branch TEXT,
-    target_branch TEXT NOT NULL,
+    upstream_branch TEXT NOT NULL,
     merged_commit_sha TEXT,
     created_at TEXT,
     updated_at TEXT,
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS prs (
     author TEXT,
     created_in_db_at TEXT NOT NULL,
     updated_in_db_at TEXT NOT NULL,
-    UNIQUE(github_pr_number, target_branch)
+    UNIQUE(github_pr_number, upstream_branch)
 );
 
 CREATE TABLE IF NOT EXISTS pr_files (
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     decision TEXT NOT NULL,
     confidence TEXT NOT NULL,
     bugfix_classification TEXT,
-    applies_to_oss_015 INTEGER,
+    applies_to_target_ref INTEGER,
     reason TEXT NOT NULL,
     human_action TEXT,
     created_at TEXT NOT NULL,
@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS evidence (
     command TEXT,
     exit_code INTEGER,
     log_path TEXT,
+    patch_path TEXT,
     FOREIGN KEY(decision_id) REFERENCES decisions(id)
 );
 
@@ -125,8 +126,8 @@ CREATE TABLE IF NOT EXISTS human_reviews (
     FOREIGN KEY(pr_id) REFERENCES prs(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_prs_target_branch_merged_at
-    ON prs(target_branch, merged_at);
+CREATE INDEX IF NOT EXISTS idx_prs_upstream_branch_merged_at
+    ON prs(upstream_branch, merged_at);
 
 CREATE INDEX IF NOT EXISTS idx_pr_files_pr_id
     ON pr_files(pr_id);

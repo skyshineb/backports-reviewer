@@ -46,7 +46,7 @@ def test_generate_reports_places_prs_in_expected_categories(
             connection,
             pr_id=candidate_pr_id,
             analysis_run_id=candidate_run_id,
-            decision="MASTER_POSSIBLY_APPLICABLE",
+            decision="SOURCE_POSSIBLY_APPLICABLE",
             reason="Relevant 0.15 logic exists without test proof",
             human_action="Review public OSS applicability",
             created_at="2024-01-01T00:10:00Z",
@@ -118,7 +118,7 @@ def test_generate_reports_places_prs_in_expected_categories(
     audit = _read_jsonl(result.full_audit_path)
 
     assert result.backport_candidates_count == 1
-    assert "MASTER_POSSIBLY_APPLICABLE" in candidates
+    assert "SOURCE_POSSIBLY_APPLICABLE" in candidates
     assert "Matched public 0.15 code path" in candidates
     assert "needs_review" in candidates
     assert result.inconclusive_count == 3
@@ -150,7 +150,7 @@ def test_generate_reports_includes_command_created_human_review(
             connection,
             pr_id=pr_id,
             analysis_run_id=analysis_run_id,
-            decision="MASTER_POSSIBLY_APPLICABLE",
+            decision="SOURCE_POSSIBLY_APPLICABLE",
             reason="Relevant 0.15 logic exists without test proof",
             created_at="2024-01-01T00:10:00Z",
         )
@@ -200,7 +200,7 @@ def test_full_audit_includes_all_decisions_and_evidence(tmp_path: Path) -> None:
             connection,
             pr_id=pr_id,
             analysis_run_id=second_run_id,
-            decision="MASTER_NOT_APPLICABLE",
+            decision="SOURCE_NOT_APPLICABLE",
             reason="Code absent",
             created_at="2024-01-01T00:20:00Z",
         )
@@ -210,10 +210,10 @@ def test_full_audit_includes_all_decisions_and_evidence(tmp_path: Path) -> None:
     result = generate_reports(sqlite_path=sqlite_path, output_dir=tmp_path / "reports")
     audit = _read_jsonl(result.full_audit_path)
 
-    assert audit[0]["latest_decision"]["decision"] == "MASTER_NOT_APPLICABLE"
+    assert audit[0]["latest_decision"]["decision"] == "SOURCE_NOT_APPLICABLE"
     assert [row["decision"] for row in audit[0]["decisions"]] == [
         "INCONCLUSIVE",
-        "MASTER_NOT_APPLICABLE",
+        "SOURCE_NOT_APPLICABLE",
     ]
     assert audit[0]["decisions"][0]["evidence"][0]["description"] == "unclear"
     assert audit[0]["decisions"][1]["evidence"][0]["description"] == "absent"
@@ -243,13 +243,13 @@ def test_generate_reports_overwrites_stale_content_after_decision_changes(
             connection,
             pr_id=pr_id,
             analysis_run_id=first_run_id,
-            decision="DIRECT_015_BUGFIX",
+            decision="TARGET_BRANCH_BUGFIX",
             reason="Direct release fix",
             created_at="2024-01-01T00:10:00Z",
         )
 
     generate_reports(sqlite_path=sqlite_path, output_dir=output_dir)
-    assert "DIRECT_015_BUGFIX" in (output_dir / "backport-candidates.md").read_text(
+    assert "TARGET_BRANCH_BUGFIX" in (output_dir / "backport-candidates.md").read_text(
         encoding="utf-8"
     )
 
@@ -266,7 +266,7 @@ def test_generate_reports_overwrites_stale_content_after_decision_changes(
 
     generate_reports(sqlite_path=sqlite_path, output_dir=output_dir)
 
-    assert "DIRECT_015_BUGFIX" not in (
+    assert "TARGET_BRANCH_BUGFIX" not in (
         output_dir / "backport-candidates.md"
     ).read_text(encoding="utf-8")
     discarded = _read_jsonl(output_dir / "discarded.jsonl")
@@ -294,7 +294,7 @@ def _insert_saved_pr(
             github_pr_number,
             github_pr_url,
             title,
-            target_branch,
+            upstream_branch,
             merged_at,
             created_in_db_at,
             updated_in_db_at
@@ -374,7 +374,7 @@ def _insert_decision(
             decision,
             confidence,
             bugfix_classification,
-            applies_to_oss_015,
+            applies_to_target_ref,
             reason,
             human_action,
             created_at

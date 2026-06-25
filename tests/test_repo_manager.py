@@ -185,11 +185,17 @@ def make_config(
             branches=["master", "0.15"],
             token_env="GITHUB_TOKEN",
             token=None,
+            branch_ref_map={"0.15": "release-0.15.0"},
         ),
         local_repo=LocalRepoConfig(
             upstream_url="https://github.com/apache/hudi.git",
             repo_dir=tmp_path / "workspace" / "upstream",
             worktree_dir=tmp_path / "workspace" / "worktrees",
+            target_ref=TargetRefConfig(
+                label="0.15",
+                ref="origin/release-0.15.0",
+                worktree_suffix="015",
+            ),
         ),
         codex=CodexConfig(
             command="codex",

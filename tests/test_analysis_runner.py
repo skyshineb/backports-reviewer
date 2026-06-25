@@ -111,15 +111,22 @@ def test_analyze_one_pr_stores_successful_validated_codex_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config(tmp_path)
+    config = replace(config, codex=replace(config.codex, reasoning_effort="high"))
     init_database(config.storage.sqlite_path)
     task_dir, bundle = _make_bundle(tmp_path)
     _write_valid_codex_result(task_dir)
+    codex_requests = []
 
     with connect(config.storage.sqlite_path) as connection:
         pr_id = _insert_saved_pr(connection, status="QUEUED_FOR_ANALYSIS")
 
     monkeypatch.setattr("backport_harness.analysis_runner.build_task_bundle", lambda **kwargs: bundle)
-    monkeypatch.setattr("backport_harness.analysis_runner.run_codex", _successful_codex_run)
+
+    def capture_codex_request(request):
+        codex_requests.append(request)
+        return _successful_codex_run(request)
+
+    monkeypatch.setattr("backport_harness.analysis_runner.run_codex", capture_codex_request)
 
     result = analyze_one_pr(config=config, pr_number=12345)
 
@@ -166,10 +173,11 @@ def test_analyze_one_pr_stores_successful_validated_codex_result(
 
     assert result.validation is not None
     assert result.validation.valid is True
+    assert codex_requests[0].reasoning_effort == "high"
     assert queue_row == ("REPORTABLE", None, None, None)
     assert run_row == ("VALIDATED", 0)
     assert decision_row == (
-        "MASTER_FIX_VERIFIED_ON_015",
+        "SOURCE_FIX_VERIFIED_ON_TARGET",
         "very_high",
         "The affected class and method exist in OSS 0.15.",
     )
@@ -251,7 +259,7 @@ def _insert_saved_pr(connection, *, status: str) -> int:
             github_pr_number,
             github_pr_url,
             title,
-            target_branch,
+            upstream_branch,
             merged_commit_sha,
             merged_at,
             created_in_db_at,
@@ -347,15 +355,15 @@ def _write_valid_codex_result(task_dir: Path) -> None:
     (task_dir / "output" / "codex_result.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "pr_number": 12345,
-                "target_branch": "master",
-                "decision": "MASTER_FIX_VERIFIED_ON_015",
+                "upstream_branch": "master",
+                "decision": "SOURCE_FIX_VERIFIED_ON_TARGET",
                 "confidence": "very_high",
                 "summary": "Fixes null handling in compaction scheduling.",
                 "human_action": "Review adapted patch and backport if appropriate.",
                 "applicability": {
-                    "applies_to_oss_015": True,
+                    "applies_to_target_ref": True,
                     "reason": "The affected class and method exist in OSS 0.15.",
                     "affected_public_paths": [
                         "hudi-client/src/main/java/example/Foo.java",

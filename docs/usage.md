@@ -33,15 +33,19 @@ Initialize the SQLite database:
 .venv/bin/backport-harness --config config.yaml db init
 ```
 
-The default `config.yaml` stores state under `workspace/`, writes reports under `reports/`, uses public Apache Hudi upstream settings, and sets the default Codex and stale-run timeout to 7200 seconds.
+The root `config.yaml` is an editable generic template. It stores state under `workspace/default/`, writes reports under `reports/default/`, sets the default Codex and stale-run timeout to 7200 seconds, and runs Codex with `medium` reasoning effort. Concrete examples are available in `examples/config.lance-v7.yaml` and `examples/config.hudi.yaml`.
+
+Release 0.1 treats the SQLite schema as the first public baseline. If `db init`
+reports an incompatible schema, point `storage.sqlite_path` at a fresh database
+or recreate the file from public source data.
 
 ## Configuration
 
 The important config sections are:
 
-- `github`: public upstream owner, repo, branches, token environment variable, delays, retries, and rate-limit behavior.
-- `local_repo`: public upstream clone location and public worktree directory.
-- `codex`: Codex command, execution mode, timeout, max attempts, and expected result file.
+- `github`: public upstream owner, repo, branches, optional branch-to-Git ref mapping, token environment variable, delays, retries, and rate-limit behavior.
+- `local_repo`: public upstream clone location, public worktree directory, and required public `target_ref` with `label`, Git `ref`, and `worktree_suffix`.
+- `codex`: Codex command, execution mode, timeout, max attempts, expected result file, and reasoning effort.
 - `analysis`: default batch limit and stale-run timeout.
 - `reports`: report output directory.
 - `storage`: SQLite path.
@@ -61,7 +65,7 @@ Scan PRs by inclusive `merged_at` date range:
 ```sh
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31
-.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch main
 ```
 
 If `--branch` is omitted, every branch listed in `github.branches` is scanned. The scanner is intentionally slow: it delays between requests and pages, respects rate-limit headers, backs off on transient failures, and records scan audit rows.
@@ -74,7 +78,7 @@ List saved PRs:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml list-prs
-.venv/bin/backport-harness --config config.yaml list-prs --branch master
+.venv/bin/backport-harness --config config.yaml list-prs --branch main
 .venv/bin/backport-harness --config config.yaml list-prs --status QUEUED_FOR_ANALYSIS
 .venv/bin/backport-harness --config config.yaml list-prs --from-date 2024-01-01 --to-date 2024-01-31 --limit 50
 .venv/bin/backport-harness --config config.yaml list-prs --order-by priority
@@ -92,7 +96,7 @@ Inspection reads only SQLite. It can show PR metadata, changed files, queue stat
 
 ## Prepare Public Analysis Inputs
 
-Prepare only the public OSS `0.15` worktree:
+Prepare only the configured public target-ref worktree:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml prepare --pr 12345
@@ -104,7 +108,7 @@ Prepare the public Codex task bundle without invoking Codex:
 .venv/bin/backport-harness --config config.yaml prepare-bundle --pr 12345
 ```
 
-Task bundles are created under `workspace/tasks/pr-12345/` and include `pr.json`, `files_changed.json`, `pr.diff`, `instructions.md`, a public OSS `0.15` worktree reference, and output directories for logs and patches.
+Task bundles are created under the configured task directory and include `pr.json`, `files_changed.json`, `pr.diff`, `instructions.md`, a configured public target-ref worktree reference, and output directories for logs and patches.
 
 ## Analyze Selected PRs
 

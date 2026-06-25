@@ -61,7 +61,7 @@ def test_build_task_bundle_writes_expected_files_and_directories(
     pr_payload = json.loads(bundle.pr_json_path.read_text(encoding="utf-8"))
     files_payload = json.loads(bundle.files_changed_json_path.read_text(encoding="utf-8"))
     assert pr_payload["github_pr_number"] == 12345
-    assert pr_payload["target_branch"] == "master"
+    assert pr_payload["upstream_branch"] == "master"
     assert files_payload == [
         {
             "additions": 10,
@@ -110,8 +110,8 @@ def test_build_task_bundle_generates_branch_specific_instructions(
         in master_instructions
     )
     assert "worktree path supplied by the task builder" not in master_instructions
-    assert "Analyze Upstream 0.15 PR" in branch_instructions
-    assert "DIRECT_015_BUGFIX" in branch_instructions
+    assert "Analyze Configured Target-Branch PR" in branch_instructions
+    assert "TARGET_BRANCH_BUGFIX" in branch_instructions
     assert (
         "Configured public target-ref worktree: "
         f"`{config.local_repo.worktree_dir / 'pr-2-015'}`"
@@ -232,7 +232,7 @@ def _insert_saved_pr(
                 title,
                 body,
                 source_branch,
-                target_branch,
+                upstream_branch,
                 merged_commit_sha,
                 created_at,
                 updated_at,

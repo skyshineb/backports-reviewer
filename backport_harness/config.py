@@ -16,9 +16,8 @@ DEFAULT_MAX_RETRIES = 5
 DEFAULT_BACKOFF_MULTIPLIER = 2.0
 DEFAULT_RESPECT_RATE_LIMIT = True
 DEFAULT_ANALYSIS_LIMIT = 5
-DEFAULT_TARGET_LABEL = "0.15"
-DEFAULT_TARGET_REF = "origin/release-0.15.0"
-DEFAULT_TARGET_WORKTREE_SUFFIX = "015"
+DEFAULT_CODEX_REASONING_EFFORT = "medium"
+CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 
 TOKEN_FIELD_NAMES = {"token", "github_token", "access_token"}
 
@@ -30,6 +29,7 @@ class GithubConfig:
     branches: list[str]
     token_env: str
     token: str | None
+    branch_ref_map: dict[str, str] = field(default_factory=dict)
     request_delay_seconds: float = DEFAULT_REQUEST_DELAY_SECONDS
     page_delay_seconds: float = DEFAULT_PAGE_DELAY_SECONDS
     max_retries: int = DEFAULT_MAX_RETRIES
@@ -39,9 +39,9 @@ class GithubConfig:
 
 @dataclass(frozen=True)
 class TargetRefConfig:
-    label: str = DEFAULT_TARGET_LABEL
-    ref: str = DEFAULT_TARGET_REF
-    worktree_suffix: str = DEFAULT_TARGET_WORKTREE_SUFFIX
+    label: str
+    ref: str
+    worktree_suffix: str
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class LocalRepoConfig:
     upstream_url: str
     repo_dir: Path
     worktree_dir: Path
-    target_ref: TargetRefConfig = field(default_factory=TargetRefConfig)
+    target_ref: TargetRefConfig
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,7 @@ class CodexConfig:
     timeout_seconds: int
     max_attempts_per_pr: int
     result_file: str
+    reasoning_effort: str = DEFAULT_CODEX_REASONING_EFFORT
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,11 @@ def _load_github_config(data: dict[str, Any]) -> GithubConfig:
         branches=_required_str_list(section, "branches", "github"),
         token_env=token_env,
         token=os.environ.get(token_env),
+        branch_ref_map=_optional_str_mapping(
+            section,
+            "branch_ref_map",
+            "github",
+        ),
         request_delay_seconds=_optional_float(
             section,
             "request_delay_seconds",
@@ -170,33 +176,34 @@ def _load_local_repo_config(
 
 
 def _load_target_ref_config(section: dict[str, Any]) -> TargetRefConfig:
-    target_ref = _optional_mapping(section, "target_ref")
-    suffix = _optional_str(
-        target_ref,
-        "worktree_suffix",
-        DEFAULT_TARGET_WORKTREE_SUFFIX,
-        "local_repo.target_ref",
-    )
+    target_ref = section.get("target_ref")
+    if not isinstance(target_ref, dict):
+        raise ValueError(
+            "Config section 'local_repo.target_ref' is required and must be a mapping."
+        )
+    suffix = _required_str(target_ref, "worktree_suffix", "local_repo.target_ref")
     _validate_path_segment(suffix, "local_repo.target_ref.worktree_suffix")
     return TargetRefConfig(
-        label=_optional_str(
-            target_ref,
-            "label",
-            DEFAULT_TARGET_LABEL,
-            "local_repo.target_ref",
-        ),
-        ref=_optional_str(
-            target_ref,
-            "ref",
-            DEFAULT_TARGET_REF,
-            "local_repo.target_ref",
-        ),
+        label=_required_str(target_ref, "label", "local_repo.target_ref"),
+        ref=_required_str(target_ref, "ref", "local_repo.target_ref"),
         worktree_suffix=suffix,
     )
 
 
 def _load_codex_config(data: dict[str, Any]) -> CodexConfig:
     section = _required_mapping(data, "codex")
+    reasoning_effort = _optional_str(
+        section,
+        "reasoning_effort",
+        DEFAULT_CODEX_REASONING_EFFORT,
+        "codex",
+    )
+    if reasoning_effort not in CODEX_REASONING_EFFORTS:
+        allowed = ", ".join(sorted(CODEX_REASONING_EFFORTS))
+        raise ValueError(
+            "Config value 'codex.reasoning_effort' must be one of "
+            f"{allowed}."
+        )
     return CodexConfig(
         command=_required_str(section, "command", "codex"),
         mode=_required_str(section, "mode", "codex"),
@@ -208,6 +215,7 @@ def _load_codex_config(data: dict[str, Any]) -> CodexConfig:
         ),
         max_attempts_per_pr=_required_int(section, "max_attempts_per_pr", "codex"),
         result_file=_required_str(section, "result_file", "codex"),
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -277,6 +285,28 @@ def _optional_mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"Config section '{key}' must be a mapping.")
     return value
+
+
+def _optional_str_mapping(
+    section: dict[str, Any],
+    key: str,
+    section_name: str,
+) -> dict[str, str]:
+    value = section.get(key, {})
+    if not isinstance(value, dict):
+        raise ValueError(f"Config section '{section_name}.{key}' must be a mapping.")
+    result: dict[str, str] = {}
+    for map_key, map_value in value.items():
+        if not isinstance(map_key, str) or not map_key:
+            raise ValueError(
+                f"Config section '{section_name}.{key}' keys must be non-empty strings."
+            )
+        if not isinstance(map_value, str) or not map_value:
+            raise ValueError(
+                f"Config value '{section_name}.{key}.{map_key}' must be a non-empty string."
+            )
+        result[map_key] = map_value
+    return result
 
 
 def _required_str(section: dict[str, Any], key: str, section_name: str) -> str:

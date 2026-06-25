@@ -1,21 +1,32 @@
-# Verify Configured Public Target-Ref Fix
+# Transplant Public Regression Test
 
 ## Security Boundary
 
 Use only public upstream data included in the task bundle and the configured public target-ref worktree.
 Do not use, request, infer, or reference private fork code, private patches, private repository history, private test data, private business logic, or private paths.
-If the fix cannot be adapted or verified from public context, choose `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`.
+If a regression test cannot be transplanted from public context, choose `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`.
 
 ## Responsibility
 
-Adapt the public upstream fix to the configured public target-ref worktree only when the bug has been reproduced or strong public evidence supports verification.
-Run the same focused public test again when available.
-Save any adapted patch under `output/patches/` and logs under `output/logs/`.
+Identify a focused public regression test from the PR when one exists.
+Attempt to adapt it to the configured public target-ref worktree using only public code.
+Record the command, exit code, result, and log path under `output/logs/`.
 
 ## No-Test Policy
 
 Do not discard a PR only because no regression test exists.
+Use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists but there is no test proof.
 Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.
+
+## Test Transplant Outcome Policy
+
+- No public regression test found: use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
+- Test not applicable to the configured public target ref: use `INCONCLUSIVE`.
+- Transplanted test does not compile: use `INCONCLUSIVE`.
+- Transplanted test fails with the expected bug before fix: use `SOURCE_REPRODUCED_ON_TARGET`.
+- Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.
+- Transplanted test passes before fix: use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
+- Transplanted test is flaky: use `INCONCLUSIVE`.
 
 ## Test Execution Limits
 
@@ -35,8 +46,8 @@ Do not write prose outside `output/codex_result.json` and `output/notes.md`.
 
 ## Allowed Decisions
 
-- `MASTER_FIX_VERIFIED_ON_015`
-- `MASTER_REPRODUCED_ON_015`
+- `SOURCE_REPRODUCED_ON_TARGET`
+- `SOURCE_POSSIBLY_APPLICABLE`
 - `INCONCLUSIVE`
 - `NEEDS_HUMAN_REVIEW`
 - `FAILED_INFRA`
@@ -58,14 +69,14 @@ Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptat
 Write strict JSON only to `output/codex_result.json`.
 Write human-readable notes only to `output/notes.md`.
 Do not write prose outside `output/codex_result.json` and `output/notes.md`.
-Use `schema_version: 1`.
+Use `schema_version: 2`.
 Use only the allowed decision values listed above.
 
 The JSON object must include these top-level fields:
 
 - `schema_version`
 - `pr_number`
-- `target_branch`
+- `upstream_branch`
 - `decision`
 - `confidence`
 - `summary`
@@ -86,12 +97,12 @@ The JSON object must include these top-level fields:
 
 `applicability` must be an object with:
 
-- `applies_to_oss_015`: boolean or null when unknown.
+- `applies_to_target_ref`: boolean or null when unknown.
 - `reason`: non-empty string.
 - `affected_public_paths`: array of repository-relative public paths.
 - `missing_public_paths`: array of repository-relative public paths.
 
-The `applies_to_oss_015` field retains its historical name; interpret it as applicability to the configured public target ref for this task.
+Interpret `applies_to_target_ref` as applicability to the configured public target ref for this task.
 
 `test_transplant` must be an object with:
 
@@ -138,8 +149,8 @@ Use null only for fields that are explicitly unavailable because a test, transpl
 
 Decision-specific requirements:
 
-- `MASTER_FIX_VERIFIED_ON_015`: require `confidence: very_high`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, a `fix_verification.log_path`, at least one `test_failure` evidence item with the before-fix log path, and at least one `test_pass` evidence item with the after-fix log path and adapted patch path.
-- `MASTER_REPRODUCED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
+- `SOURCE_REPRODUCED_ON_TARGET`: require `test_transplant.attempted: true`, `test_transplant.result: applied` or `applied_and_compiled`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
+- `SOURCE_POSSIBLY_APPLICABLE`: require `applicability.applies_to_target_ref: true` or null with a reason, plus `code_presence` or `logic_match` evidence.
 - `INCONCLUSIVE` and `NEEDS_HUMAN_REVIEW`: require `uncertainty` evidence and a clear `applicability.reason`.
 - `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or required input file that identifies one of the failures allowed by the `FAILED_INFRA` policy.
 

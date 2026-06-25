@@ -3,11 +3,9 @@ from pathlib import Path
 import pytest
 
 from backport_harness.config import (
+    DEFAULT_CODEX_REASONING_EFFORT,
     DEFAULT_CODEX_TIMEOUT_SECONDS,
     DEFAULT_STALE_TIMEOUT_SECONDS,
-    DEFAULT_TARGET_LABEL,
-    DEFAULT_TARGET_REF,
-    DEFAULT_TARGET_WORKTREE_SUFFIX,
     load_config,
 )
 
@@ -21,6 +19,8 @@ github:
   branches:
     - master
     - "0.15"
+  branch_ref_map:
+    "0.15": release-0.15.0
   token_env: GITHUB_TOKEN
 
 local_repo:
@@ -58,10 +58,11 @@ def test_load_config_returns_typed_config(tmp_path: Path) -> None:
     assert config.github.owner == "apache"
     assert config.github.repo == "hudi"
     assert config.github.branches == ["master", "0.15"]
+    assert config.github.branch_ref_map == {"0.15": "release-0.15.0"}
     assert config.local_repo.upstream_url == "https://github.com/apache/hudi.git"
-    assert config.local_repo.target_ref.label == DEFAULT_TARGET_LABEL
-    assert config.local_repo.target_ref.ref == DEFAULT_TARGET_REF
-    assert config.local_repo.target_ref.worktree_suffix == DEFAULT_TARGET_WORKTREE_SUFFIX
+    assert config.local_repo.target_ref.label == "0.15"
+    assert config.local_repo.target_ref.ref == "origin/release-0.15.0"
+    assert config.local_repo.target_ref.worktree_suffix == "015"
 
 
 def test_load_config_reads_custom_target_ref(tmp_path: Path) -> None:
@@ -154,8 +155,42 @@ def test_load_config_applies_defaults(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.codex.timeout_seconds == DEFAULT_CODEX_TIMEOUT_SECONDS
+    assert config.codex.reasoning_effort == DEFAULT_CODEX_REASONING_EFFORT
     assert config.analysis.default_limit == 5
     assert config.analysis.stale_timeout_seconds == DEFAULT_STALE_TIMEOUT_SECONDS
+
+
+def test_load_config_reads_custom_codex_reasoning_effort(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "  result_file: output/codex_result.json\n",
+            "  result_file: output/codex_result.json\n  reasoning_effort: high\n",
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.codex.reasoning_effort == "high"
+
+
+def test_load_config_rejects_invalid_codex_reasoning_effort(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "  result_file: output/codex_result.json\n",
+            "  result_file: output/codex_result.json\n  reasoning_effort: maximum\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="codex.reasoning_effort"):
+        load_config(config_path)
 
 
 def test_load_config_reads_github_token_from_env(

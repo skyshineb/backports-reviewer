@@ -1,22 +1,25 @@
 from __future__ import annotations
 
-from pathlib import Path
+from importlib import resources
 
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-ANALYZE_015_PROMPT = "analyze_015_pr.md"
-ANALYZE_MASTER_PROMPT = "analyze_master_pr.md"
+PROMPTS_PACKAGE = "backport_harness.prompts"
+ANALYZE_TARGET_BRANCH_PROMPT = "analyze_target_branch_pr.md"
+ANALYZE_SOURCE_BRANCH_PROMPT = "analyze_source_branch_pr.md"
 TRANSPLANT_TEST_PROMPT = "transplant_test.md"
 VERIFY_FIX_PROMPT = "verify_fix.md"
 
 
 def load_prompt_template(name: str) -> str:
-    path = PROMPTS_DIR / name
-    return path.read_text(encoding="utf-8")
+    return resources.files(PROMPTS_PACKAGE).joinpath(name).read_text(encoding="utf-8")
 
 
-def analysis_prompt_for_branch(target_branch: str) -> str:
-    if target_branch == "0.15":
-        return load_prompt_template(ANALYZE_015_PROMPT)
+def analysis_prompt_for_branch(
+    upstream_branch: str,
+    *,
+    target_ref_label: str | None = None,
+) -> str:
+    if target_ref_label is not None and upstream_branch == target_ref_label:
+        return load_prompt_template(ANALYZE_TARGET_BRANCH_PROMPT)
 
-    return load_prompt_template(ANALYZE_MASTER_PROMPT)
+    return load_prompt_template(ANALYZE_SOURCE_BRANCH_PROMPT)

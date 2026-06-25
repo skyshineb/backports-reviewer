@@ -39,18 +39,25 @@ def test_queue_transitions_reject_terminal_or_invalid_paths() -> None:
         validate_transition("UNKNOWN", QUEUE_STATUS_RUNNING)
 
 
-def test_assign_initial_priority_for_target_branch_015() -> None:
-    assert assign_initial_priority("0.15", "Add new feature") == 10
+def test_assign_initial_priority_for_configured_target_branch() -> None:
+    assert (
+        assign_initial_priority(
+            "release",
+            "Add new feature",
+            target_ref_label="release",
+        )
+        == 10
+    )
 
 
-def test_assign_initial_priority_for_likely_master_bugfix() -> None:
-    assert assign_initial_priority("master", "Fix NPE in compaction") == 20
-    assert assign_initial_priority("master", "Resolve data loss error") == 20
+def test_assign_initial_priority_for_likely_source_bugfix() -> None:
+    assert assign_initial_priority("main", "Fix NPE in compaction") == 20
+    assert assign_initial_priority("main", "Resolve data loss error") == 20
 
 
-def test_assign_initial_priority_for_ambiguous_master_fix() -> None:
-    assert assign_initial_priority("master", "Avoid stale metadata table state") == 50
+def test_assign_initial_priority_for_ambiguous_source_fix() -> None:
+    assert assign_initial_priority("main", "Avoid stale metadata table state") == 50
 
 
 def test_assign_initial_priority_default() -> None:
-    assert assign_initial_priority("master", "Add new config option") == 100
+    assert assign_initial_priority("main", "Add new config option") == 100

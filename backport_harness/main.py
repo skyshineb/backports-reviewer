@@ -30,7 +30,7 @@ app = typer.Typer(help="Public upstream backport review harness.")
 db_app = typer.Typer(help="Manage the harness SQLite database.")
 app.add_typer(db_app, name="db")
 
-DEFAULT_SQLITE_PATH = Path("workspace/backport_harness.sqlite3")
+DEFAULT_SQLITE_PATH = Path("workspace/default/backport_harness.sqlite3")
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -111,7 +111,7 @@ def list_prs(
     branch: Optional[str] = typer.Option(
         None,
         "--branch",
-        help="Saved PR target branch to display.",
+        help="Saved PR upstream branch to display.",
     ),
     status: Optional[str] = typer.Option(
         None,
