@@ -4,15 +4,15 @@ from pathlib import Path
 
 PROMPTS_DIR = Path("prompts")
 PROMPT_FILES = [
-    "analyze_015_pr.md",
-    "analyze_master_pr.md",
+    "analyze_target_branch_pr.md",
+    "analyze_source_branch_pr.md",
     "transplant_test.md",
     "verify_fix.md",
 ]
 REQUIRED_JSON_FIELDS = [
     "schema_version",
     "pr_number",
-    "target_branch",
+    "upstream_branch",
     "decision",
     "confidence",
     "summary",
@@ -68,10 +68,10 @@ EVIDENCE_TYPES = [
 STRUCTURED_CONTRACT_SNIPPETS = [
     "`confidence` must be one of:",
     "`applicability` must be an object with:",
-    "`applies_to_oss_015`: boolean or null when unknown.",
+    "`applies_to_target_ref`: boolean or null when unknown.",
     "`affected_public_paths`: array of repository-relative public paths.",
     "`missing_public_paths`: array of repository-relative public paths.",
-    "The `applies_to_oss_015` field retains its historical name; interpret it as applicability to the configured public target ref for this task.",
+    "Interpret `applies_to_target_ref` as applicability to the configured public target ref for this task.",
     "`test_transplant` must be an object with:",
     "`test_before_fix` must be an object with:",
     "`fix_verification` must be an object with:",
@@ -112,26 +112,26 @@ NO_TEST_POLICY_SNIPPETS = [
     "Do not discard a PR only because no regression test exists.",
     "Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.",
 ]
-MASTER_NO_TEST_POLICY_SNIPPETS = [
+SOURCE_NO_TEST_POLICY_SNIPPETS = [
     "Do not discard a source-branch PR only because no regression test exists.",
-    "Use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists but there is no test proof.",
+    "Use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists but there is no test proof.",
     "Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.",
 ]
 TEST_TRANSPLANT_OUTCOME_SNIPPETS = [
-    "No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.",
+    "No public regression test found: use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.",
     "Test not applicable to the configured public target ref: use `INCONCLUSIVE`.",
     "Transplanted test does not compile: use `INCONCLUSIVE`.",
-    "Transplanted test fails with the expected bug before fix: use `MASTER_REPRODUCED_ON_015`.",
+    "Transplanted test fails with the expected bug before fix: use `SOURCE_REPRODUCED_ON_TARGET`.",
     "Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.",
-    "Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.",
+    "Transplanted test passes before fix: use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.",
     "Transplanted test is flaky: use `INCONCLUSIVE`.",
 ]
 WORKTREE_CONTEXT_SNIPPET = (
     "Configured public target-ref worktree from the rendered task context line "
     "`Configured public target-ref worktree: <path>`"
 )
-ANALYZE_015_DECISIONS = [
-    "DIRECT_015_BUGFIX",
+ANALYZE_TARGET_BRANCH_DECISIONS = [
+    "TARGET_BRANCH_BUGFIX",
     "DISCARDED_NON_BUGFIX",
     "DISCARDED_DOCS_ONLY",
     "DISCARDED_CI_ONLY",
@@ -140,11 +140,11 @@ ANALYZE_015_DECISIONS = [
     "INCONCLUSIVE",
     "FAILED_INFRA",
 ]
-ANALYZE_MASTER_DECISIONS = [
-    "MASTER_NOT_APPLICABLE",
-    "MASTER_POSSIBLY_APPLICABLE",
-    "MASTER_REPRODUCED_ON_015",
-    "MASTER_FIX_VERIFIED_ON_015",
+ANALYZE_SOURCE_BRANCH_DECISIONS = [
+    "SOURCE_NOT_APPLICABLE",
+    "SOURCE_POSSIBLY_APPLICABLE",
+    "SOURCE_REPRODUCED_ON_TARGET",
+    "SOURCE_FIX_VERIFIED_ON_TARGET",
     "INCONCLUSIVE",
     "NEEDS_HUMAN_REVIEW",
     "DISCARDED_NON_BUGFIX",
@@ -154,31 +154,43 @@ ANALYZE_MASTER_DECISIONS = [
     "FAILED_INFRA",
 ]
 TRANSPLANT_DECISIONS = [
-    "MASTER_REPRODUCED_ON_015",
-    "MASTER_POSSIBLY_APPLICABLE",
+    "SOURCE_REPRODUCED_ON_TARGET",
+    "SOURCE_POSSIBLY_APPLICABLE",
     "INCONCLUSIVE",
     "NEEDS_HUMAN_REVIEW",
     "FAILED_INFRA",
 ]
 VERIFY_DECISIONS = [
-    "MASTER_FIX_VERIFIED_ON_015",
-    "MASTER_REPRODUCED_ON_015",
+    "SOURCE_FIX_VERIFIED_ON_TARGET",
+    "SOURCE_REPRODUCED_ON_TARGET",
     "INCONCLUSIVE",
     "NEEDS_HUMAN_REVIEW",
     "FAILED_INFRA",
 ]
 DECISIONS_BY_PROMPT = {
-    "analyze_015_pr.md": ANALYZE_015_DECISIONS,
-    "analyze_master_pr.md": ANALYZE_MASTER_DECISIONS,
+    "analyze_target_branch_pr.md": ANALYZE_TARGET_BRANCH_DECISIONS,
+    "analyze_source_branch_pr.md": ANALYZE_SOURCE_BRANCH_DECISIONS,
     "transplant_test.md": TRANSPLANT_DECISIONS,
     "verify_fix.md": VERIFY_DECISIONS,
 }
-ANALYSIS_DECISION_SPECIFIC_REQUIREMENTS = [
-    "DIRECT_015_BUGFIX",
-    "MASTER_FIX_VERIFIED_ON_015",
-    "MASTER_REPRODUCED_ON_015",
-    "MASTER_POSSIBLY_APPLICABLE",
-    "MASTER_NOT_APPLICABLE",
+TARGET_BRANCH_DECISION_SPECIFIC_REQUIREMENTS = [
+    "TARGET_BRANCH_BUGFIX",
+    "DISCARDED_NON_BUGFIX",
+    "DISCARDED_DOCS_ONLY",
+    "DISCARDED_CI_ONLY",
+    "DISCARDED_RELEASE_ONLY",
+    "INCONCLUSIVE",
+    "NEEDS_HUMAN_REVIEW",
+    "FAILED_INFRA",
+    "classification` evidence",
+    "uncertainty` evidence",
+    "infra_failure` evidence",
+]
+SOURCE_BRANCH_DECISION_SPECIFIC_REQUIREMENTS = [
+    "SOURCE_FIX_VERIFIED_ON_TARGET",
+    "SOURCE_REPRODUCED_ON_TARGET",
+    "SOURCE_POSSIBLY_APPLICABLE",
+    "SOURCE_NOT_APPLICABLE",
     "DISCARDED_NON_BUGFIX",
     "DISCARDED_DOCS_ONLY",
     "DISCARDED_CI_ONLY",
@@ -195,8 +207,8 @@ ANALYSIS_DECISION_SPECIFIC_REQUIREMENTS = [
     "fix behavior already present in the configured public target ref",
 ]
 TRANSPLANT_DECISION_SPECIFIC_REQUIREMENTS = [
-    "MASTER_REPRODUCED_ON_015",
-    "MASTER_POSSIBLY_APPLICABLE",
+    "SOURCE_REPRODUCED_ON_TARGET",
+    "SOURCE_POSSIBLY_APPLICABLE",
     "INCONCLUSIVE",
     "NEEDS_HUMAN_REVIEW",
     "FAILED_INFRA",
@@ -206,8 +218,8 @@ TRANSPLANT_DECISION_SPECIFIC_REQUIREMENTS = [
     "`test_failure` evidence",
 ]
 VERIFY_DECISION_SPECIFIC_REQUIREMENTS = [
-    "MASTER_FIX_VERIFIED_ON_015",
-    "MASTER_REPRODUCED_ON_015",
+    "SOURCE_FIX_VERIFIED_ON_TARGET",
+    "SOURCE_REPRODUCED_ON_TARGET",
     "INCONCLUSIVE",
     "NEEDS_HUMAN_REVIEW",
     "FAILED_INFRA",
@@ -218,7 +230,7 @@ VERIFY_DECISION_SPECIFIC_REQUIREMENTS = [
     "`confidence: very_high`",
     "after-fix log path and adapted patch path",
 ]
-MASTER_INVESTIGATION_SEQUENCE = [
+SOURCE_INVESTIGATION_SEQUENCE = [
     "1. Read `pr.json` for PR metadata.",
     "2. Inspect `files_changed.json` and `pr.diff`.",
     "3. Classify the PR type.",
@@ -331,21 +343,21 @@ def test_prompts_define_modification_boundaries() -> None:
 
 
 def test_prompts_define_no_test_policy() -> None:
-    for prompt_file in ("analyze_015_pr.md", "transplant_test.md", "verify_fix.md"):
+    for prompt_file in ("analyze_target_branch_pr.md", "transplant_test.md", "verify_fix.md"):
         content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
 
         for snippet in NO_TEST_POLICY_SNIPPETS:
             assert snippet in content
 
-    master_content = (PROMPTS_DIR / "analyze_master_pr.md").read_text(
+    source_content = (PROMPTS_DIR / "analyze_source_branch_pr.md").read_text(
         encoding="utf-8"
     )
-    for snippet in MASTER_NO_TEST_POLICY_SNIPPETS:
-        assert snippet in master_content
+    for snippet in SOURCE_NO_TEST_POLICY_SNIPPETS:
+        assert snippet in source_content
 
 
 def test_transplant_prompts_define_outcome_policy() -> None:
-    for prompt_file in ("analyze_master_pr.md", "transplant_test.md"):
+    for prompt_file in ("analyze_source_branch_pr.md", "transplant_test.md"):
         content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
 
         assert "## Test Transplant Outcome Policy" in content
@@ -354,7 +366,7 @@ def test_transplant_prompts_define_outcome_policy() -> None:
 
 
 def test_analysis_prompts_rely_on_rendered_worktree_context() -> None:
-    for prompt_file in ("analyze_015_pr.md", "analyze_master_pr.md"):
+    for prompt_file in ("analyze_target_branch_pr.md", "analyze_source_branch_pr.md"):
         content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
 
         assert WORKTREE_CONTEXT_SNIPPET in content
@@ -362,12 +374,19 @@ def test_analysis_prompts_rely_on_rendered_worktree_context() -> None:
 
 
 def test_prompts_define_decision_specific_evidence_requirements() -> None:
-    for prompt_file in ("analyze_015_pr.md", "analyze_master_pr.md"):
-        content = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+    target_content = (PROMPTS_DIR / "analyze_target_branch_pr.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Decision-specific requirements:" in target_content
+    for requirement in TARGET_BRANCH_DECISION_SPECIFIC_REQUIREMENTS:
+        assert requirement in target_content
 
-        assert "Decision-specific requirements:" in content
-        for requirement in ANALYSIS_DECISION_SPECIFIC_REQUIREMENTS:
-            assert requirement in content
+    source_content = (PROMPTS_DIR / "analyze_source_branch_pr.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Decision-specific requirements:" in source_content
+    for requirement in SOURCE_BRANCH_DECISION_SPECIFIC_REQUIREMENTS:
+        assert requirement in source_content
 
 
 def test_transplant_and_verify_decision_requirements_are_phase_specific() -> None:
@@ -378,9 +397,9 @@ def test_transplant_and_verify_decision_requirements_are_phase_specific() -> Non
     for requirement in TRANSPLANT_DECISION_SPECIFIC_REQUIREMENTS:
         assert requirement in transplant
     for disallowed_decision in (
-        "DIRECT_015_BUGFIX",
-        "MASTER_FIX_VERIFIED_ON_015",
-        "MASTER_NOT_APPLICABLE",
+        "TARGET_BRANCH_BUGFIX",
+        "SOURCE_FIX_VERIFIED_ON_TARGET",
+        "SOURCE_NOT_APPLICABLE",
         "DISCARDED_NON_BUGFIX",
         "DISCARDED_DOCS_ONLY",
         "DISCARDED_CI_ONLY",
@@ -394,9 +413,9 @@ def test_transplant_and_verify_decision_requirements_are_phase_specific() -> Non
     for requirement in VERIFY_DECISION_SPECIFIC_REQUIREMENTS:
         assert requirement in verify
     for disallowed_decision in (
-        "DIRECT_015_BUGFIX",
-        "MASTER_POSSIBLY_APPLICABLE",
-        "MASTER_NOT_APPLICABLE",
+        "TARGET_BRANCH_BUGFIX",
+        "SOURCE_POSSIBLY_APPLICABLE",
+        "SOURCE_NOT_APPLICABLE",
         "DISCARDED_NON_BUGFIX",
         "DISCARDED_DOCS_ONLY",
         "DISCARDED_CI_ONLY",
@@ -411,11 +430,11 @@ def test_prompts_list_exact_allowed_decisions() -> None:
         assert _allowed_decisions(content) == expected_decisions
 
 
-def test_master_prompt_defines_required_investigation_sequence_in_order() -> None:
-    content = (PROMPTS_DIR / "analyze_master_pr.md").read_text(encoding="utf-8")
+def test_source_prompt_defines_required_investigation_sequence_in_order() -> None:
+    content = (PROMPTS_DIR / "analyze_source_branch_pr.md").read_text(encoding="utf-8")
     position = -1
 
-    for step in MASTER_INVESTIGATION_SEQUENCE:
+    for step in SOURCE_INVESTIGATION_SEQUENCE:
         next_position = content.find(step, position + 1)
         assert next_position > position
         position = next_position

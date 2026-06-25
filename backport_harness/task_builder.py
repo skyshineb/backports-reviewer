@@ -155,7 +155,7 @@ def _pr_payload(pull_request: InspectedPullRequest) -> dict[str, object]:
         "title": pull_request.title,
         "body": pull_request.body,
         "source_branch": pull_request.source_branch,
-        "target_branch": pull_request.target_branch,
+        "upstream_branch": pull_request.upstream_branch,
         "merged_commit_sha": pull_request.merged_commit_sha,
         "created_at": pull_request.created_at,
         "updated_at": pull_request.updated_at,
@@ -185,13 +185,16 @@ def _instructions_for(
     pull_request: InspectedPullRequest,
     worktree_path: Path,
 ) -> str:
-    prompt_template = analysis_prompt_for_branch(pull_request.target_branch)
+    prompt_template = analysis_prompt_for_branch(
+        pull_request.upstream_branch,
+        target_ref_label=config.local_repo.target_ref.label,
+    )
     return f"""# Backport Analysis Task for PR #{pull_request.github_pr_number}
 
 ## Task-Specific Context
 
 - PR number: `{pull_request.github_pr_number}`
-- Target branch: `{pull_request.target_branch}`
+- Upstream branch: `{pull_request.upstream_branch}`
 - Configured public target ref: `{config.local_repo.target_ref.label}` (`{config.local_repo.target_ref.ref}`)
 - PR metadata file: `pr.json`
 - Changed files file: `files_changed.json`

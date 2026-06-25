@@ -13,9 +13,6 @@ from backport_harness.security import (
     validate_safe_stale_worktree_removal,
 )
 
-def prepare_oss_015_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
-    return prepare_target_worktree(config, pr_number=pr_number)
-
 
 def prepare_target_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
     if pr_number < 1:

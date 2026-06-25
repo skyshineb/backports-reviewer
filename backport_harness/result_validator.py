@@ -41,7 +41,7 @@ def validate_codex_result_file(
     *,
     task_dir: Path,
     result_path: Path,
-    expected_target_branch: str | None = None,
+    expected_upstream_branch: str | None = None,
 ) -> ValidationOutcome:
     issues: list[ValidationIssue] = []
     if not result_path.exists():
@@ -52,7 +52,7 @@ def validate_codex_result_file(
     except (OSError, ValueError, ValidationError) as error:
         return _invalid("result_path", f"Codex result schema validation failed: {error}")
 
-    issues.extend(_validate_target_branch(result, expected_target_branch))
+    issues.extend(_validate_upstream_branch(result, expected_upstream_branch))
     issues.extend(_validate_referenced_logs(task_dir, result))
     issues.extend(_validate_referenced_patches(task_dir, result))
     issues.extend(_validate_decision_specific_claims(task_dir, result))
@@ -62,17 +62,17 @@ def validate_codex_result_file(
     return ValidationOutcome(valid=True, result=result)
 
 
-def _validate_target_branch(
+def _validate_upstream_branch(
     result: CodexResult,
-    expected_target_branch: str | None,
+    expected_upstream_branch: str | None,
 ) -> list[ValidationIssue]:
-    if expected_target_branch is None or result.target_branch == expected_target_branch:
+    if expected_upstream_branch is None or result.upstream_branch == expected_upstream_branch:
         return []
     return [
         ValidationIssue(
-            "target_branch",
-            "Codex result target_branch does not match saved PR target branch: "
-            f"{result.target_branch} != {expected_target_branch}.",
+            "upstream_branch",
+            "Codex result upstream_branch does not match saved PR upstream branch: "
+            f"{result.upstream_branch} != {expected_upstream_branch}.",
         )
     ]
 
@@ -116,14 +116,16 @@ def _validate_decision_specific_claims(
     task_dir: Path,
     result: CodexResult,
 ) -> list[ValidationIssue]:
-    if result.decision is Decision.MASTER_FIX_VERIFIED_ON_015:
-        return _validate_master_fix_verified(task_dir, result)
-    if result.decision is Decision.MASTER_REPRODUCED_ON_015:
-        return _validate_master_reproduced(result)
-    if result.decision is Decision.MASTER_POSSIBLY_APPLICABLE:
-        return _validate_master_possibly_applicable(result)
-    if result.decision is Decision.MASTER_NOT_APPLICABLE:
-        return _validate_master_not_applicable(result)
+    if result.decision is Decision.TARGET_BRANCH_BUGFIX:
+        return _validate_target_branch_bugfix(result)
+    if result.decision is Decision.SOURCE_FIX_VERIFIED_ON_TARGET:
+        return _validate_source_fix_verified(task_dir, result)
+    if result.decision is Decision.SOURCE_REPRODUCED_ON_TARGET:
+        return _validate_source_reproduced(result)
+    if result.decision is Decision.SOURCE_POSSIBLY_APPLICABLE:
+        return _validate_source_possibly_applicable(result)
+    if result.decision is Decision.SOURCE_NOT_APPLICABLE:
+        return _validate_source_not_applicable(result)
     if result.decision in {Decision.INCONCLUSIVE, Decision.NEEDS_HUMAN_REVIEW}:
         return _validate_uncertain(result)
     if result.decision is Decision.FAILED_INFRA:
@@ -131,17 +133,40 @@ def _validate_decision_specific_claims(
     return []
 
 
-def _validate_master_fix_verified(
+def _validate_target_branch_bugfix(result: CodexResult) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if result.applicability.applies_to_target_ref is not True:
+        issues.append(
+            ValidationIssue(
+                "applicability.applies_to_target_ref",
+                "TARGET_BRANCH_BUGFIX requires applies_to_target_ref=true.",
+            )
+        )
+    if not (
+        _has_evidence(result, EvidenceType.CLASSIFICATION)
+        or _has_evidence(result, EvidenceType.CODE_PRESENCE)
+        or _has_evidence(result, EvidenceType.LOGIC_MATCH)
+    ):
+        issues.append(
+            ValidationIssue(
+                "evidence",
+                "TARGET_BRANCH_BUGFIX requires classification, code_presence, or logic_match evidence.",
+            )
+        )
+    return issues
+
+
+def _validate_source_fix_verified(
     task_dir: Path,
     result: CodexResult,
 ) -> list[ValidationIssue]:
-    issues = _validate_master_reproduced(result)
+    issues = _validate_source_reproduced(result)
 
     if result.confidence is not Confidence.VERY_HIGH:
         issues.append(
             ValidationIssue(
                 "confidence",
-                "MASTER_FIX_VERIFIED_ON_015 requires very_high confidence.",
+                "SOURCE_FIX_VERIFIED_ON_TARGET requires very_high confidence.",
             )
         )
 
@@ -190,19 +215,19 @@ def _validate_master_fix_verified(
 
     if not _has_evidence(result, EvidenceType.TEST_PASS):
         issues.append(
-            ValidationIssue("evidence", "MASTER_FIX_VERIFIED_ON_015 requires test_pass evidence.")
+            ValidationIssue("evidence", "SOURCE_FIX_VERIFIED_ON_TARGET requires test_pass evidence.")
         )
     elif not _has_test_pass_for_fix_verification(result):
         issues.append(
             ValidationIssue(
                 "evidence",
-                "MASTER_FIX_VERIFIED_ON_015 test_pass evidence must reference the after-fix log and adapted patch.",
+                "SOURCE_FIX_VERIFIED_ON_TARGET test_pass evidence must reference the after-fix log and adapted patch.",
             )
         )
     return issues
 
 
-def _validate_master_reproduced(result: CodexResult) -> list[ValidationIssue]:
+def _validate_source_reproduced(result: CodexResult) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if not result.test_transplant.attempted:
         issues.append(
@@ -244,7 +269,7 @@ def _validate_master_reproduced(result: CodexResult) -> list[ValidationIssue]:
         )
     if not _has_evidence(result, EvidenceType.TEST_FAILURE):
         issues.append(
-            ValidationIssue("evidence", "MASTER_REPRODUCED_ON_015 requires test_failure evidence.")
+            ValidationIssue("evidence", "SOURCE_REPRODUCED_ON_TARGET requires test_failure evidence.")
         )
     if (
         result.test_before_fix.result is not TestResult.FAILED_WITH_EXPECTED_ERROR
@@ -259,13 +284,13 @@ def _validate_master_reproduced(result: CodexResult) -> list[ValidationIssue]:
     return issues
 
 
-def _validate_master_possibly_applicable(result: CodexResult) -> list[ValidationIssue]:
+def _validate_source_possibly_applicable(result: CodexResult) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    if result.applicability.applies_to_oss_015 is False:
+    if result.applicability.applies_to_target_ref is False:
         issues.append(
             ValidationIssue(
-                "applicability.applies_to_oss_015",
-                "MASTER_POSSIBLY_APPLICABLE requires applies_to_oss_015=true or unknown.",
+                "applicability.applies_to_target_ref",
+                "SOURCE_POSSIBLY_APPLICABLE requires applies_to_target_ref=true or unknown.",
             )
         )
     if not (
@@ -275,7 +300,7 @@ def _validate_master_possibly_applicable(result: CodexResult) -> list[Validation
         issues.append(
             ValidationIssue(
                 "evidence",
-                "MASTER_POSSIBLY_APPLICABLE requires code_presence or logic_match evidence.",
+                "SOURCE_POSSIBLY_APPLICABLE requires code_presence or logic_match evidence.",
             )
         )
     if result.test_before_fix.result in {
@@ -294,13 +319,13 @@ def _validate_master_possibly_applicable(result: CodexResult) -> list[Validation
     return issues
 
 
-def _validate_master_not_applicable(result: CodexResult) -> list[ValidationIssue]:
+def _validate_source_not_applicable(result: CodexResult) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    if result.applicability.applies_to_oss_015 is not False:
+    if result.applicability.applies_to_target_ref is not False:
         issues.append(
             ValidationIssue(
-                "applicability.applies_to_oss_015",
-                "MASTER_NOT_APPLICABLE requires applies_to_oss_015=false.",
+                "applicability.applies_to_target_ref",
+                "SOURCE_NOT_APPLICABLE requires applies_to_target_ref=false.",
             )
         )
     non_applicability = [
@@ -312,7 +337,7 @@ def _validate_master_not_applicable(result: CodexResult) -> list[ValidationIssue
         issues.append(
             ValidationIssue(
                 "evidence",
-                "MASTER_NOT_APPLICABLE requires non_applicability evidence.",
+                "SOURCE_NOT_APPLICABLE requires non_applicability evidence.",
             )
         )
 
@@ -391,14 +416,22 @@ def _mentions_strong_non_applicability_basis(text: str) -> bool:
         or ("missing" in normalized and "module" in normalized)
         or ("absent" in normalized and "feature" in normalized)
         or ("missing" in normalized and "feature" in normalized)
-        or "introduced after 0.15" in normalized
-        or "introduced after `0.15`" in normalized
-        or ("already present" in normalized and "0.15" in normalized)
-        or ("already contains" in normalized and "0.15" in normalized)
+        or (
+            "introduced after" in normalized
+            and ("target" in normalized or "configured" in normalized)
+        )
+        or (
+            "already present" in normalized
+            and ("target" in normalized or "configured" in normalized)
+        )
+        or (
+            "already contains" in normalized
+            and ("target" in normalized or "configured" in normalized)
+        )
         or (
             "fix behavior" in normalized
             and "already" in normalized
-            and "0.15" in normalized
+            and ("target" in normalized or "configured" in normalized)
         )
     )
 

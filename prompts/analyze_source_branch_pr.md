@@ -23,17 +23,17 @@ Do not silently discard uncertain cases.
 ## Source-Branch No-Test Policy
 
 Do not discard a source-branch PR only because no regression test exists.
-Use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists but there is no test proof.
+Use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists but there is no test proof.
 Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.
 
 ## Test Transplant Outcome Policy
 
-- No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
+- No public regression test found: use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
 - Test not applicable to the configured public target ref: use `INCONCLUSIVE`.
 - Transplanted test does not compile: use `INCONCLUSIVE`.
-- Transplanted test fails with the expected bug before fix: use `MASTER_REPRODUCED_ON_015`.
+- Transplanted test fails with the expected bug before fix: use `SOURCE_REPRODUCED_ON_TARGET`.
 - Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.
-- Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
+- Transplanted test passes before fix: use `SOURCE_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
 - Transplanted test is flaky: use `INCONCLUSIVE`.
 
 ## Test Execution Limits
@@ -70,10 +70,10 @@ Follow this sequence before choosing a decision:
 
 ## Allowed Decisions
 
-- `MASTER_NOT_APPLICABLE`
-- `MASTER_POSSIBLY_APPLICABLE`
-- `MASTER_REPRODUCED_ON_015`
-- `MASTER_FIX_VERIFIED_ON_015`
+- `SOURCE_NOT_APPLICABLE`
+- `SOURCE_POSSIBLY_APPLICABLE`
+- `SOURCE_REPRODUCED_ON_TARGET`
+- `SOURCE_FIX_VERIFIED_ON_TARGET`
 - `INCONCLUSIVE`
 - `NEEDS_HUMAN_REVIEW`
 - `DISCARDED_NON_BUGFIX`
@@ -99,14 +99,14 @@ Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptat
 Write strict JSON only to `output/codex_result.json`.
 Write human-readable notes only to `output/notes.md`.
 Do not write prose outside `output/codex_result.json` and `output/notes.md`.
-Use `schema_version: 1`.
+Use `schema_version: 2`.
 Use only the allowed decision values listed above.
 
 The JSON object must include these top-level fields:
 
 - `schema_version`
 - `pr_number`
-- `target_branch`
+- `upstream_branch`
 - `decision`
 - `confidence`
 - `summary`
@@ -127,12 +127,12 @@ The JSON object must include these top-level fields:
 
 `applicability` must be an object with:
 
-- `applies_to_oss_015`: boolean or null when unknown.
+- `applies_to_target_ref`: boolean or null when unknown.
 - `reason`: non-empty string.
 - `affected_public_paths`: array of repository-relative public paths.
 - `missing_public_paths`: array of repository-relative public paths.
 
-The `applies_to_oss_015` field retains its historical name; interpret it as applicability to the configured public target ref for this task.
+Interpret `applies_to_target_ref` as applicability to the configured public target ref for this task.
 
 `test_transplant` must be an object with:
 
@@ -179,11 +179,11 @@ Use null only for fields that are explicitly unavailable because a test, transpl
 
 Decision-specific requirements:
 
-- `DIRECT_015_BUGFIX`: require `applicability.applies_to_oss_015: true` and `classification`, `code_presence`, or `logic_match` evidence showing this is a configured public target-ref bugfix candidate.
-- `MASTER_FIX_VERIFIED_ON_015`: require `confidence: very_high`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, a `fix_verification.log_path`, at least one `test_failure` evidence item with the before-fix log path, and at least one `test_pass` evidence item with the after-fix log path and adapted patch path.
-- `MASTER_REPRODUCED_ON_015`: require `test_transplant.attempted: true`, `test_transplant.result: applied` or `applied_and_compiled`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
-- `MASTER_POSSIBLY_APPLICABLE`: require `applicability.applies_to_oss_015: true` or null with a reason, plus `code_presence` or `logic_match` evidence.
-- `MASTER_NOT_APPLICABLE`: require `applicability.applies_to_oss_015: false` and `non_applicability` evidence for absent file, class, module, feature, bug introduction after the configured target ref, or fix behavior already present in the configured public target ref.
+- `TARGET_BRANCH_BUGFIX`: require `applicability.applies_to_target_ref: true` and `classification`, `code_presence`, or `logic_match` evidence showing this is a configured public target-ref bugfix candidate.
+- `SOURCE_FIX_VERIFIED_ON_TARGET`: require `confidence: very_high`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, a `fix_verification.log_path`, at least one `test_failure` evidence item with the before-fix log path, and at least one `test_pass` evidence item with the after-fix log path and adapted patch path.
+- `SOURCE_REPRODUCED_ON_TARGET`: require `test_transplant.attempted: true`, `test_transplant.result: applied` or `applied_and_compiled`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
+- `SOURCE_POSSIBLY_APPLICABLE`: require `applicability.applies_to_target_ref: true` or null with a reason, plus `code_presence` or `logic_match` evidence.
+- `SOURCE_NOT_APPLICABLE`: require `applicability.applies_to_target_ref: false` and `non_applicability` evidence for absent file, class, module, feature, bug introduction after the configured target ref, or fix behavior already present in the configured public target ref.
 - `DISCARDED_NON_BUGFIX`, `DISCARDED_DOCS_ONLY`, `DISCARDED_CI_ONLY`, and `DISCARDED_RELEASE_ONLY`: require `classification` evidence.
 - `INCONCLUSIVE` and `NEEDS_HUMAN_REVIEW`: require `uncertainty` evidence and a clear `applicability.reason`.
 - `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or input file that explains the tooling or environment failure.

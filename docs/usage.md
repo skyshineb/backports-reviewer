@@ -33,14 +33,14 @@ Initialize the SQLite database:
 .venv/bin/backport-harness --config config.yaml db init
 ```
 
-The default `config.yaml` stores state under `workspace/`, writes reports under `reports/`, uses public Apache Hudi upstream settings, sets the default Codex and stale-run timeout to 7200 seconds, and runs Codex with `medium` reasoning effort.
+The default `config.yaml` stores state under `workspace/lance-v7/`, writes reports under `reports/lance-v7/`, uses public Lance upstream settings, sets the public target ref to tag `v7.0.0`, sets the default Codex and stale-run timeout to 7200 seconds, and runs Codex with `medium` reasoning effort. `config.hudi.yaml` is available as the Apache Hudi `master`/`0.15` example.
 
 ## Configuration
 
 The important config sections are:
 
-- `github`: public upstream owner, repo, branches, token environment variable, delays, retries, and rate-limit behavior.
-- `local_repo`: public upstream clone location and public worktree directory.
+- `github`: public upstream owner, repo, branches, optional branch-to-Git ref mapping, token environment variable, delays, retries, and rate-limit behavior.
+- `local_repo`: public upstream clone location, public worktree directory, and required public `target_ref` with `label`, Git `ref`, and `worktree_suffix`.
 - `codex`: Codex command, execution mode, timeout, max attempts, expected result file, and reasoning effort.
 - `analysis`: default batch limit and stale-run timeout.
 - `reports`: report output directory.
@@ -92,7 +92,7 @@ Inspection reads only SQLite. It can show PR metadata, changed files, queue stat
 
 ## Prepare Public Analysis Inputs
 
-Prepare only the public OSS `0.15` worktree:
+Prepare only the configured public target-ref worktree:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml prepare --pr 12345
@@ -104,7 +104,7 @@ Prepare the public Codex task bundle without invoking Codex:
 .venv/bin/backport-harness --config config.yaml prepare-bundle --pr 12345
 ```
 
-Task bundles are created under `workspace/tasks/pr-12345/` and include `pr.json`, `files_changed.json`, `pr.diff`, `instructions.md`, a public OSS `0.15` worktree reference, and output directories for logs and patches.
+Task bundles are created under the configured task directory and include `pr.json`, `files_changed.json`, `pr.diff`, `instructions.md`, a configured public target-ref worktree reference, and output directories for logs and patches.
 
 ## Analyze Selected PRs
 

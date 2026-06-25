@@ -29,7 +29,7 @@ def render_analyze_dry_run(
 
     table = Table(title="Analysis Dry Run")
     table.add_column("PR", no_wrap=True)
-    table.add_column("Branch", no_wrap=True)
+    table.add_column("Upstream branch", no_wrap=True)
     table.add_column("Merged at", no_wrap=True)
     table.add_column("Queue status", no_wrap=True)
     table.add_column("Priority", justify="right", no_wrap=True)
@@ -40,7 +40,7 @@ def render_analyze_dry_run(
     for candidate in candidates:
         table.add_row(
             f"#{candidate.github_pr_number}",
-            candidate.target_branch,
+            candidate.upstream_branch,
             candidate.merged_at,
             candidate.queue_status,
             str(candidate.priority),

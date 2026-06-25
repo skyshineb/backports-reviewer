@@ -11,11 +11,6 @@ class RepositoryError(RuntimeError):
     pass
 
 
-BRANCH_ALIASES = {
-    "0.15": "release-0.15.0",
-}
-
-
 def ensure_upstream_repo(config: HarnessConfig) -> Path:
     repo_dir = config.local_repo.repo_dir
     validate_public_path(repo_dir, config.security.forbidden_private_prefixes)
@@ -39,6 +34,7 @@ def ensure_upstream_repo(config: HarnessConfig) -> Path:
     _fetch_configured_refs(
         repo_dir,
         branches=config.github.branches,
+        branch_ref_map=config.github.branch_ref_map,
         target_ref=config.local_repo.target_ref.ref,
     )
     return repo_dir
@@ -61,12 +57,13 @@ def _fetch_configured_refs(
     repo_dir: Path,
     *,
     branches: list[str],
+    branch_ref_map: dict[str, str],
     target_ref: str,
 ) -> None:
-    remote_branches = [_remote_branch_name(branch) for branch in branches]
-    target_branch = _target_remote_branch_name(target_ref)
-    if target_branch is not None and target_branch not in remote_branches:
-        remote_branches.append(target_branch)
+    remote_branches = [_remote_branch_name(branch, branch_ref_map) for branch in branches]
+    upstream_branch = _target_remote_branch_name(target_ref)
+    if upstream_branch is not None and upstream_branch not in remote_branches:
+        remote_branches.append(upstream_branch)
 
     run_git(
         [
@@ -97,8 +94,8 @@ def _fetch_configured_refs(
         )
 
 
-def _remote_branch_name(branch: str) -> str:
-    return BRANCH_ALIASES.get(branch, branch)
+def _remote_branch_name(branch: str, branch_ref_map: dict[str, str]) -> str:
+    return branch_ref_map.get(branch, branch)
 
 
 def _target_remote_branch_name(target_ref: str) -> str | None:

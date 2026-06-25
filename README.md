@@ -49,22 +49,26 @@ Do not put token values in `config.yaml`.
 
 ## Configuration
 
-The default `config.yaml` is a public-upstream example. Adjust it for the public
-repository and branches you want to review.
+The default `config.yaml` targets the public Lance repository (`main` as the
+source branch and tag `v7.0.0` as the public target ref). `config.hudi.yaml`
+keeps the older Apache Hudi `master`/`0.15` example. Adjust either file for the
+public repository, branches, and target ref you want to review.
 
 Important sections:
 
-- `github`: public upstream owner, repo, branches, token environment variable,
-  request delays, retry settings, and rate-limit handling.
-- `local_repo`: public upstream clone location and public worktree directory.
+- `github`: public upstream owner, repo, source branches, optional branch-to-Git
+  ref mapping, token environment variable, request delays, retry settings, and
+  rate-limit handling.
+- `local_repo`: public upstream clone location, public worktree directory, and
+  required `target_ref` (`label`, Git `ref`, and worktree suffix).
 - `codex`: Codex command, timeout, max attempts, and expected result path.
 - `analysis`: default dry-run selection limit and stale-run timeout.
 - `reports`: output directory for generated reports.
 - `storage`: SQLite database path.
 - `security`: optional forbidden private path prefixes.
 
-The default workspace is under `workspace/`; reports are written under
-`reports/`.
+The default workspace is under `workspace/lance-v7/`; reports are written under
+`reports/lance-v7/`.
 
 ## Workflow
 

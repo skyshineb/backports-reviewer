@@ -23,17 +23,17 @@ def test_valid_master_fix_verified_result(tmp_path: Path) -> None:
     assert outcome.issues == ()
 
 
-def test_target_branch_must_match_expected_branch(tmp_path: Path) -> None:
-    task_dir = _write_result(tmp_path, _valid_result(target_branch="main"))
+def test_upstream_branch_must_match_expected_branch(tmp_path: Path) -> None:
+    task_dir = _write_result(tmp_path, _valid_result(upstream_branch="main"))
 
     outcome = validate_codex_result_file(
         task_dir=task_dir,
         result_path=task_dir / "output" / "codex_result.json",
-        expected_target_branch="master",
+        expected_upstream_branch="master",
     )
 
     assert outcome.valid is False
-    assert "does not match saved PR target branch" in outcome.summary
+    assert "does not match saved PR upstream branch" in outcome.summary
 
 
 def test_missing_result_file_is_invalid(tmp_path: Path) -> None:
@@ -174,7 +174,7 @@ def test_fix_verified_rejects_test_pass_evidence_without_patch_path(
 
 
 def test_valid_master_reproduced_result(tmp_path: Path) -> None:
-    payload = _valid_result(decision="MASTER_REPRODUCED_ON_015")
+    payload = _valid_result(decision="SOURCE_REPRODUCED_ON_TARGET")
     payload["fix_verification"] = _not_attempted_fix()
     payload["evidence"] = [
         payload["evidence"][0],
@@ -191,7 +191,7 @@ def test_valid_master_reproduced_result(tmp_path: Path) -> None:
 
 
 def test_master_reproduced_requires_applied_transplant(tmp_path: Path) -> None:
-    payload = _valid_result(decision="MASTER_REPRODUCED_ON_015")
+    payload = _valid_result(decision="SOURCE_REPRODUCED_ON_TARGET")
     payload["test_transplant"] = {
         "attempted": True,
         "result": "does_not_compile",
@@ -214,7 +214,7 @@ def test_master_reproduced_requires_applied_transplant(tmp_path: Path) -> None:
 
 
 def test_master_reproduced_requires_expected_failure(tmp_path: Path) -> None:
-    payload = _valid_result(decision="MASTER_REPRODUCED_ON_015")
+    payload = _valid_result(decision="SOURCE_REPRODUCED_ON_TARGET")
     payload["fix_verification"] = _not_attempted_fix()
     payload["test_before_fix"]["result"] = "failed"
     payload["evidence"][1]["description"] = "Regression test fails."
@@ -232,7 +232,7 @@ def test_master_reproduced_requires_expected_failure(tmp_path: Path) -> None:
 def test_valid_master_possibly_applicable_with_passing_transplanted_test(
     tmp_path: Path,
 ) -> None:
-    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE", confidence="medium")
+    payload = _valid_result(decision="SOURCE_POSSIBLY_APPLICABLE", confidence="medium")
     payload["test_transplant"] = {
         "attempted": True,
         "result": "applied_and_compiled",
@@ -266,7 +266,7 @@ def test_valid_master_possibly_applicable_with_passing_transplanted_test(
 def test_master_possibly_applicable_requires_code_or_logic_evidence(
     tmp_path: Path,
 ) -> None:
-    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE")
+    payload = _valid_result(decision="SOURCE_POSSIBLY_APPLICABLE")
     payload["test_before_fix"] = _not_attempted_test()
     payload["fix_verification"] = _not_attempted_fix()
     payload["evidence"] = [
@@ -289,8 +289,8 @@ def test_master_possibly_applicable_requires_code_or_logic_evidence(
 def test_master_possibly_applicable_rejects_negative_applicability(
     tmp_path: Path,
 ) -> None:
-    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE")
-    payload["applicability"]["applies_to_oss_015"] = False
+    payload = _valid_result(decision="SOURCE_POSSIBLY_APPLICABLE")
+    payload["applicability"]["applies_to_target_ref"] = False
     payload["test_before_fix"] = _not_attempted_test()
     payload["fix_verification"] = _not_attempted_fix()
     task_dir = _write_result(tmp_path, payload)
@@ -301,7 +301,7 @@ def test_master_possibly_applicable_rejects_negative_applicability(
     )
 
     assert outcome.valid is False
-    assert "requires applies_to_oss_015=true or unknown" in outcome.summary
+    assert "requires applies_to_target_ref=true or unknown" in outcome.summary
 
 
 @pytest.mark.parametrize(
@@ -319,7 +319,7 @@ def test_master_possibly_applicable_rejects_failed_transplant_outcomes(
     test_result: str,
     exit_code: int,
 ) -> None:
-    payload = _valid_result(decision="MASTER_POSSIBLY_APPLICABLE", confidence="medium")
+    payload = _valid_result(decision="SOURCE_POSSIBLY_APPLICABLE", confidence="medium")
     payload["test_transplant"] = {
         "attempted": True,
         "result": "applied_and_compiled",
@@ -352,9 +352,9 @@ def test_master_possibly_applicable_rejects_failed_transplant_outcomes(
 
 
 def test_valid_master_not_applicable_result(tmp_path: Path) -> None:
-    payload = _valid_result(decision="MASTER_NOT_APPLICABLE")
+    payload = _valid_result(decision="SOURCE_NOT_APPLICABLE")
     payload["applicability"] = {
-        "applies_to_oss_015": False,
+        "applies_to_target_ref": False,
         "reason": "The affected class is absent in OSS 0.15.",
         "affected_public_paths": [],
         "missing_public_paths": ["hudi-client/src/main/java/example/Foo.java"],
@@ -381,9 +381,9 @@ def test_valid_master_not_applicable_result(tmp_path: Path) -> None:
 def test_valid_master_not_applicable_when_fix_already_present(
     tmp_path: Path,
 ) -> None:
-    payload = _valid_result(decision="MASTER_NOT_APPLICABLE")
+    payload = _valid_result(decision="SOURCE_NOT_APPLICABLE")
     payload["applicability"] = {
-        "applies_to_oss_015": False,
+        "applies_to_target_ref": False,
         "reason": (
             "The affected public OSS 0.15 code exists, but the fix behavior "
             "is already present in HoodieFlinkStreamer append mode."
@@ -400,7 +400,7 @@ def test_valid_master_not_applicable_when_fix_already_present(
         {
             "type": "non_applicability",
             "description": (
-                "The target 0.15 worktree already contains the master fix "
+                "The target 0.15 worktree already contains the source-branch fix "
                 "behavior, so there is no missing public 0.15 hunk to transplant."
             ),
             "path": "hudi-flink-datasource/hudi-flink/src/main/java/org/apache/hudi/streamer/HoodieFlinkStreamer.java",
@@ -417,8 +417,8 @@ def test_valid_master_not_applicable_when_fix_already_present(
 
 
 def test_master_not_applicable_requires_strong_reason(tmp_path: Path) -> None:
-    payload = _valid_result(decision="MASTER_NOT_APPLICABLE")
-    payload["applicability"]["applies_to_oss_015"] = False
+    payload = _valid_result(decision="SOURCE_NOT_APPLICABLE")
+    payload["applicability"]["applies_to_target_ref"] = False
     payload["applicability"]["reason"] = "Probably not relevant."
     payload["test_before_fix"] = _not_attempted_test()
     payload["fix_verification"] = _not_attempted_fix()
@@ -633,16 +633,16 @@ def _make_task_dir(tmp_path: Path) -> Path:
 
 def _valid_result(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "pr_number": 12345,
-        "target_branch": "master",
-        "decision": "MASTER_FIX_VERIFIED_ON_015",
+        "upstream_branch": "master",
+        "decision": "SOURCE_FIX_VERIFIED_ON_TARGET",
         "confidence": "very_high",
         "bugfix_classification": "correctness_bugfix",
         "summary": "Fixes null handling in compaction scheduling.",
         "human_action": "Review adapted patch and backport if appropriate.",
         "applicability": {
-            "applies_to_oss_015": True,
+            "applies_to_target_ref": True,
             "reason": "The affected class and method exist in OSS 0.15.",
             "affected_public_paths": [
                 "hudi-client/src/main/java/example/Foo.java",
@@ -650,7 +650,7 @@ def _valid_result(**overrides: Any) -> dict[str, Any]:
             "missing_public_paths": [],
         },
         "touched_components": ["hudi-client", "compaction"],
-        "production_files_relevant_to_015": [
+        "production_files_relevant_to_target": [
             "hudi-client/src/main/java/example/Foo.java",
         ],
         "test_files_used": [

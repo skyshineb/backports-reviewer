@@ -25,11 +25,17 @@ github:
     - master
     - "0.15"
   token_env: GITHUB_TOKEN
+  branch_ref_map:
+    "0.15": release-0.15.0
 
 local_repo:
   upstream_url: https://github.com/apache/hudi.git
   repo_dir: ./workspace/upstream
   worktree_dir: ./workspace/worktrees
+  target_ref:
+    label: "0.15"
+    ref: origin/release-0.15.0
+    worktree_suffix: "015"
 
 codex:
   command: codex
@@ -362,7 +368,7 @@ def test_inspect_displays_post_analysis_details(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "MASTER_NOT_APPLICABLE" in result.output
+    assert "SOURCE_NOT_APPLICABLE" in result.output
     assert "Affected file is absent on 0.15" in result.output
     assert "workspace/tasks/pr-12345/output/stdout.log" in result.output
     assert "mvn test" in result.output
@@ -1186,7 +1192,7 @@ def _insert_saved_pr(
                 github_pr_number,
                 github_pr_url,
                 title,
-                target_branch,
+                upstream_branch,
                 merged_at,
                 created_in_db_at,
                 updated_in_db_at
@@ -1339,7 +1345,7 @@ def _insert_decision_details(
             decision,
             confidence,
             bugfix_classification,
-            applies_to_oss_015,
+            applies_to_target_ref,
             reason,
             human_action,
             created_at
@@ -1349,7 +1355,7 @@ def _insert_decision_details(
         (
             pr_id,
             analysis_run_id,
-            "MASTER_NOT_APPLICABLE",
+            "SOURCE_NOT_APPLICABLE",
             "high",
             "bugfix",
             0,

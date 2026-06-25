@@ -111,7 +111,7 @@ def list_prs(
     branch: Optional[str] = typer.Option(
         None,
         "--branch",
-        help="Saved PR target branch to display.",
+        help="Saved PR upstream branch to display.",
     ),
     status: Optional[str] = typer.Option(
         None,
