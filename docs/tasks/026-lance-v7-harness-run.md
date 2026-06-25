@@ -286,3 +286,44 @@ Scan `main` in date windows:
   - decision `MASTER_FIX_VERIFIED_ON_015`: 3
   - decision `DISCARDED_NON_BUGFIX`: 2
 - Next queued PR after the stopped run is #6989.
+- Resumed the Lance priority queue run on `2026-06-25` from branch
+  `task/027-codex-reasoning-effort`, which contains
+  `codex.reasoning_effort: medium` in `config.lance-v7.yaml`.
+- Ran `git status --short --branch`: current branch was
+  `task/027-codex-reasoning-effort...origin/task/027-codex-reasoning-effort`
+  with untracked `workspace/`.
+- Ran `recover-stale`: recovered 0 stale Codex runs.
+- Ran `analyze --dry-run --limit 5`: confirmed the next queued PRs were
+  #6989, #6787, #6994, #6999, and #6998.
+- Ran `analyze --pr 6989`: first attempt failed before Codex completion due to
+  public `git fetch` DNS failure for `github.com`; queue status became
+  `NEEDS_RETRY` with latest run status `FAILED_INFRA`.
+- Ran `retry --pr 6989`, then reran `analyze --pr 6989` and `inspect --pr
+  6989`: Codex exited 0 without timeout; result validated as
+  `MASTER_FIX_VERIFIED_ON_015` / `very_high`; queue status `REPORTABLE`;
+  attempts: 2.
+- Ran `analyze --pr 6787`: first attempt exited 1 after Codex transport
+  failures to `chatgpt.com` and HTTPS fallback `403 Forbidden`; queue status
+  became `NEEDS_RETRY` with latest run status `FAILED_INFRA`.
+- Ran `retry --pr 6787`, then reran `analyze --pr 6787` and `inspect --pr
+  6787`: Codex exited 0 without timeout; result validated as
+  `MASTER_REPRODUCED_ON_015` / `high`; queue status `REPORTABLE`; attempts: 2.
+- Stopped analysis before #6994 per operator direction.
+- Ran `recover-stale`: recovered 0 stale Codex runs.
+- Ran `report`: generated `reports/lance-v7/` with 5 backport candidates, 0
+  inconclusive rows, 2 discarded rows, and 242 full-audit rows.
+- Queried Lance queue and decision counts after the stopped run:
+  - `REPORTABLE`: 5
+  - `DONE`: 2
+  - `QUEUED_FOR_ANALYSIS`: 235
+  - priority 20 remaining queued: 79
+  - priority 50 remaining queued: 3
+  - priority 100 remaining queued: 153
+  - decision `MASTER_FIX_VERIFIED_ON_015`: 4
+  - decision `MASTER_REPRODUCED_ON_015`: 1
+  - decision `DISCARDED_NON_BUGFIX`: 2
+- Queried analysis run counts after the stopped run:
+  - `VALIDATED`: 7
+  - `FAILED_INFRA`: 2
+- Ran `analyze --dry-run --limit 5`: confirmed the next queued PRs are #6994,
+  #6999, #6998, #7004, and #6995.
