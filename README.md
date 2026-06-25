@@ -1,8 +1,34 @@
 # Backports Reviewer
 
-`backports-reviewer` is a Python harness for building a public-OSS backport review queue. It scans public upstream GitHub pull requests, stores state in SQLite, prepares public OSS worktrees and Codex task bundles, validates Codex analysis output, and generates reports for human review.
+`backports-reviewer` is a Python harness for building a public-OSS backport
+review queue. It scans public upstream GitHub pull requests, stores review state
+in SQLite, prepares public worktrees and Codex task bundles, validates Codex
+analysis output, and generates reports for human review.
 
-The harness never accesses the private fork. It must not be configured with private fork paths, private repository URLs, private patches, private history, private business logic, or private test results.
+The harness is intentionally public-only. It must not access or be configured
+with private fork paths, private repository URLs, private patches, private
+history, private business logic, or private test results.
+
+## What It Does
+
+- Scans public upstream PRs by merged date and branch.
+- Stores PR metadata, changed files, queue state, Codex attempts, decisions,
+  evidence, test runs, and human review state in SQLite.
+- Lets operators list and inspect saved PRs before spending Codex time.
+- Prepares a clean public baseline worktree and task bundle for one PR.
+- Runs Codex for one selected PR, then validates the structured result before
+  storing any decision.
+- Recovers stale runs, retries operational failures, and regenerates reports
+  from SQLite.
+
+## What It Does Not Do
+
+- It does not access a private fork.
+- It does not apply backports to private code.
+- It does not push commits or open pull requests.
+- It does not treat Codex output as trusted unless the Python harness validates
+  the result schema and referenced evidence.
+- It does not replace human review.
 
 ## Setup
 
@@ -12,13 +38,35 @@ python3 -m venv .venv
 .venv/bin/backport-harness --config config.yaml db init
 ```
 
-Optional GitHub authentication is read from the environment variable named by `github.token_env` in `config.yaml`:
+Optional GitHub authentication is read from the environment variable named by
+`github.token_env` in `config.yaml`:
 
 ```sh
 export GITHUB_TOKEN=...
 ```
 
-## Current Workflow
+Do not put token values in `config.yaml`.
+
+## Configuration
+
+The default `config.yaml` is a public-upstream example. Adjust it for the public
+repository and branches you want to review.
+
+Important sections:
+
+- `github`: public upstream owner, repo, branches, token environment variable,
+  request delays, retry settings, and rate-limit handling.
+- `local_repo`: public upstream clone location and public worktree directory.
+- `codex`: Codex command, timeout, max attempts, and expected result path.
+- `analysis`: default dry-run selection limit and stale-run timeout.
+- `reports`: output directory for generated reports.
+- `storage`: SQLite database path.
+- `security`: optional forbidden private path prefixes.
+
+The default workspace is under `workspace/`; reports are written under
+`reports/`.
+
+## Workflow
 
 All commands accept `--config config.yaml`; it defaults to `config.yaml`.
 
@@ -32,18 +80,19 @@ All commands accept `--config config.yaml`; it defaults to `config.yaml`.
 .venv/bin/backport-harness --config config.yaml report
 ```
 
-Use `prepare --pr 12345` to create only the public OSS `0.15` worktree, or `prepare-bundle --pr 12345` to create the public Codex task bundle without invoking Codex.
+The implemented analysis path runs one selected PR at a time with
+`analyze --pr`. Use `analyze --dry-run --limit N` to preview which queued PRs
+should be analyzed next.
 
 ## Commands
 
+Initialize or migrate the SQLite database:
+
 ```sh
-.venv/bin/backport-harness --help
-.venv/bin/backport-harness version
 .venv/bin/backport-harness --config config.yaml db init
 ```
 
-- `db init` creates or migrates the configured SQLite database.
-- The default project config writes to `workspace/backport_harness.sqlite3`.
+Scan public upstream PRs merged in an inclusive `merged_at` date range:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01
@@ -51,32 +100,40 @@ Use `prepare --pr 12345` to create only the public OSS `0.15` worktree, or `prep
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
 ```
 
-- `scan` reads public upstream GitHub PRs merged in the requested `merged_at` date range.
-- If `--branch` is omitted, every branch listed in `github.branches` is scanned.
-- Saved PRs are upserted, changed files are refreshed, queue rows are created if missing, and scan runs are audited.
-- Scanning does not invoke Codex or create local worktrees.
+If `--branch` is omitted, every branch listed in `github.branches` is scanned.
+Scanning is idempotent, records audit rows, and does not invoke Codex.
+
+List and inspect saved PRs from local SQLite state:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml list-prs
-.venv/bin/backport-harness --config config.yaml list-prs --branch master
-.venv/bin/backport-harness --config config.yaml list-prs --status QUEUED_FOR_ANALYSIS
-.venv/bin/backport-harness --config config.yaml list-prs --from-date 2024-01-01 --to-date 2024-01-31 --limit 50
+.venv/bin/backport-harness --config config.yaml list-prs --status QUEUED_FOR_ANALYSIS --limit 50
 .venv/bin/backport-harness --config config.yaml list-prs --order-by priority
+.venv/bin/backport-harness --config config.yaml inspect --pr 12345
 ```
 
-- `list-prs` reads only local SQLite state.
-- Supported `--order-by` values are `merged-at`, `branch`, `priority`, and `status`.
+Prepare public analysis inputs without invoking Codex:
 
 ```sh
-.venv/bin/backport-harness --config config.yaml inspect --pr 12345
+.venv/bin/backport-harness --config config.yaml prepare --pr 12345
+.venv/bin/backport-harness --config config.yaml prepare-bundle --pr 12345
+```
+
+Preview and run analysis:
+
+```sh
+.venv/bin/backport-harness --config config.yaml analyze --dry-run
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
 .venv/bin/backport-harness --config config.yaml analyze --pr 12345
 ```
 
-- `inspect` shows saved PR metadata, changed files, queue state, latest decision, evidence, logs, tests, and human review status.
-- `analyze --dry-run` selects queued PRs by priority and merge date without invoking Codex.
-- `analyze --pr` prepares the public task bundle, invokes Codex once, validates the result when possible, stores decisions/evidence/test runs, and preserves logs.
-- Non-zero exits, timeouts, malformed results, and invalid evidence preserve the task directory and mark the queue retryable until the configured attempt limit is reached.
+`analyze --pr` creates the task bundle, locks the queue row, invokes Codex,
+captures stdout and stderr, validates `output/codex_result.json`, stores valid
+decisions and evidence, and preserves task output for inspection. Timeouts,
+non-zero exits, malformed JSON, and invalid evidence mark the queue retryable
+until the configured attempt limit is reached.
+
+Recover stale runs and retry selected failures:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml recover-stale
@@ -86,10 +143,11 @@ Use `prepare --pr 12345` to create only the public OSS `0.15` worktree, or `prep
 .venv/bin/backport-harness --config config.yaml retry --pr 12345
 ```
 
-- `recover-stale` marks old `CODEX_RUNNING` rows retryable. Without `--older-than-hours`, it uses `analysis.stale_timeout_seconds`.
-- Bulk `retry --status` supports only `NEEDS_RETRY` and `FAILED_INFRA`.
-- Retry of an `INCONCLUSIVE` decision must be explicit with `retry --pr`.
-- Retry preserves prior runs, decisions, evidence, logs, and patches.
+Bulk retry supports only operational queue statuses `NEEDS_RETRY` and
+`FAILED_INFRA`. Retrying an `INCONCLUSIVE` decision requires selecting the PR
+explicitly with `retry --pr`.
+
+Generate reports and record human review state:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml report
@@ -97,17 +155,42 @@ Use `prepare --pr 12345` to create only the public OSS `0.15` worktree, or `prep
 .venv/bin/backport-harness --config config.yaml review --pr 12345 --status backported --comment "Applied internally"
 ```
 
-- `report` regenerates Markdown and JSONL reports from SQLite into `reports.output_dir`.
-- `review` records the latest human review status for one saved PR. It records state only; it does not access or modify a private fork.
+## Reports
+
+`report` regenerates files from SQLite and does not require live GitHub access
+or Codex execution.
+
+Generated report files:
+
+- `backport-candidates.md`
+- `inconclusive.md`
+- `discarded.jsonl`
+- `full-audit.jsonl`
+
+## Troubleshooting
+
+- Empty list output: run `db init` and `scan`, then verify `storage.sqlite_path`.
+- GitHub rate limits: set `GITHUB_TOKEN`, keep delays enabled, and rerun the
+  scan. Scans are idempotent.
+- Stuck `CODEX_RUNNING`: run `recover-stale`, then retry selected PRs.
+- Max attempts reached: inspect the PR and logs before deciding whether to
+  adjust config or leave the item failed.
+- Invalid Codex output: inspect the task output logs and `codex_result.json`;
+  invalid claims are rejected by the harness.
+- Private path rejection: keep public workspaces and configured paths away from
+  private fork directories.
 
 ## More Documentation
 
-See `docs/usage.md` for setup details, configuration notes, the security boundary, full operator workflows, report files, and troubleshooting.
+See `docs/usage.md` for a fuller operator guide and
+`docs/backport_harness_design.md` for design intent.
 
-## Tests
+## Development Checks
 
 ```sh
+.venv/bin/backport-harness --help
+.venv/bin/backport-harness analyze --help
+.venv/bin/backport-harness retry --help
+.venv/bin/backport-harness recover-stale --help
 .venv/bin/pytest
-.venv/bin/pytest tests/test_config.py tests/test_cli.py tests/test_storage.py
-.venv/bin/pytest tests/test_github_client.py tests/test_scan.py tests/test_cli.py
 ```
