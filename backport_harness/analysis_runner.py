@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import socket
+import time
 import uuid
 from dataclasses import dataclass
+from typing import Callable
 
 from backport_harness.codex_runner import CodexRunRequest, CodexRunResult, run_codex
 from backport_harness.config import HarnessConfig
 from backport_harness.result_validator import ValidationOutcome, validate_codex_result_file
 from backport_harness.storage import (
+    AnalysisCandidate,
+    AnalysisQueueSummary,
     connect,
     finish_analysis_run,
     finish_result_validation,
+    get_analysis_queue_summary,
+    select_analysis_candidates,
     start_analysis_run,
     store_validated_decision,
 )
@@ -24,6 +30,37 @@ class AnalyzeOneResult:
     task_dir: str
     codex_result: CodexRunResult
     validation: ValidationOutcome | None
+
+
+@dataclass(frozen=True)
+class AnalyzeBatchItemResult:
+    pr_number: int
+    title: str
+    upstream_branch: str
+    initial_queue_status: str
+    final_queue_status: str | None
+    outcome: str
+    run_id: str | None
+    codex_exit_code: int | None
+    timed_out: bool | None
+    error: str | None
+    skip_reason: str | None
+
+
+@dataclass(frozen=True)
+class AnalyzeBatchResult:
+    selected_count: int
+    processed_count: int
+    succeeded_count: int
+    failed_count: int
+    skipped_count: int
+    elapsed_seconds: float
+    stop_reason: str
+    items: list[AnalyzeBatchItemResult]
+
+
+AnalyzeOneCallable = Callable[..., AnalyzeOneResult]
+ClockCallable = Callable[[], float]
 
 
 def analyze_one_pr(
@@ -136,3 +173,277 @@ def analyze_one_pr(
         codex_result=codex_result,
         validation=validation,
     )
+
+
+def analyze_pr_batch(
+    *,
+    config: HarnessConfig,
+    limit: int,
+    max_runtime_minutes: float | None = None,
+    fail_fast: bool = False,
+    analyze_one: AnalyzeOneCallable | None = None,
+    clock: ClockCallable | None = None,
+) -> AnalyzeBatchResult:
+    if limit <= 0:
+        raise ValueError("limit must be positive.")
+    if max_runtime_minutes is not None and max_runtime_minutes <= 0:
+        raise ValueError("max_runtime_minutes must be positive.")
+
+    clock = clock or time.monotonic
+    start_time = clock()
+    max_runtime_seconds = (
+        max_runtime_minutes * 60.0 if max_runtime_minutes is not None else None
+    )
+    one_pr_runner = analyze_one or _call_analyze_one_pr
+
+    if not config.storage.sqlite_path.exists():
+        elapsed = max(0.0, clock() - start_time)
+        return AnalyzeBatchResult(
+            selected_count=0,
+            processed_count=0,
+            succeeded_count=0,
+            failed_count=0,
+            skipped_count=0,
+            elapsed_seconds=elapsed,
+            stop_reason="no candidates",
+            items=[],
+        )
+
+    with connect(config.storage.sqlite_path) as connection:
+        candidates = select_analysis_candidates(connection, limit=limit)
+
+    items: list[AnalyzeBatchItemResult] = []
+    stop_reason = "selected candidates exhausted"
+    if not candidates:
+        elapsed = max(0.0, clock() - start_time)
+        return AnalyzeBatchResult(
+            selected_count=0,
+            processed_count=0,
+            succeeded_count=0,
+            failed_count=0,
+            skipped_count=0,
+            elapsed_seconds=elapsed,
+            stop_reason="no candidates",
+            items=[],
+        )
+
+    for index, candidate in enumerate(candidates):
+        elapsed = clock() - start_time
+        if max_runtime_seconds is not None and elapsed >= max_runtime_seconds:
+            stop_reason = "max runtime reached"
+            items.extend(
+                _skipped_batch_items(
+                    candidates[index:],
+                    reason="not started because max runtime was reached",
+                )
+            )
+            break
+
+        try:
+            result = one_pr_runner(
+                config=config,
+                pr_number=candidate.github_pr_number,
+            )
+        except KeyboardInterrupt:
+            queue_summary = _queue_summary_for_candidate(config, candidate)
+            items.append(
+                _failed_batch_item(
+                    candidate=candidate,
+                    queue_summary=queue_summary,
+                    error=(
+                        "Interrupted during Codex analysis. If the queue row remains "
+                        "CODEX_RUNNING, run recover-stale before retrying."
+                    ),
+                    run_id=None,
+                    codex_exit_code=None,
+                    timed_out=None,
+                    outcome="interrupted",
+                )
+            )
+            stop_reason = "interrupted during analysis"
+            items.extend(
+                _skipped_batch_items(
+                    candidates[index + 1 :],
+                    reason="not started because analysis was interrupted",
+                )
+            )
+            break
+        except Exception as error:
+            queue_summary = _queue_summary_for_candidate(config, candidate)
+            items.append(
+                _failed_batch_item(
+                    candidate=candidate,
+                    queue_summary=queue_summary,
+                    error=f"{type(error).__name__}: {error}",
+                    run_id=None,
+                    codex_exit_code=None,
+                    timed_out=None,
+                )
+            )
+            if fail_fast:
+                stop_reason = f"fail-fast after PR #{candidate.github_pr_number}"
+                items.extend(
+                    _skipped_batch_items(
+                        candidates[index + 1 :],
+                        reason="not started because fail-fast stopped the batch",
+                    )
+                )
+                break
+            continue
+
+        queue_summary = _queue_summary_for_candidate(config, candidate)
+        item_failed = _analysis_result_failed(
+            result=result,
+            queue_summary=queue_summary,
+        )
+        if item_failed:
+            items.append(
+                _failed_batch_item(
+                    candidate=candidate,
+                    queue_summary=queue_summary,
+                    error=_failure_message(result=result, queue_summary=queue_summary),
+                    run_id=result.run_id,
+                    codex_exit_code=result.codex_result.exit_code,
+                    timed_out=result.codex_result.timed_out,
+                )
+            )
+            if fail_fast:
+                stop_reason = f"fail-fast after PR #{candidate.github_pr_number}"
+                items.extend(
+                    _skipped_batch_items(
+                        candidates[index + 1 :],
+                        reason="not started because fail-fast stopped the batch",
+                    )
+                )
+                break
+            continue
+
+        items.append(
+            AnalyzeBatchItemResult(
+                pr_number=candidate.github_pr_number,
+                title=candidate.title,
+                upstream_branch=candidate.upstream_branch,
+                initial_queue_status=candidate.queue_status,
+                final_queue_status=_queue_status(queue_summary),
+                outcome="succeeded",
+                run_id=result.run_id,
+                codex_exit_code=result.codex_result.exit_code,
+                timed_out=result.codex_result.timed_out,
+                error=None,
+                skip_reason=None,
+            )
+        )
+
+    processed_count = sum(1 for item in items if item.outcome != "skipped")
+    failed_count = sum(
+        1 for item in items if item.outcome in {"failed", "interrupted"}
+    )
+    skipped_count = sum(1 for item in items if item.outcome == "skipped")
+    succeeded_count = sum(1 for item in items if item.outcome == "succeeded")
+    elapsed = max(0.0, clock() - start_time)
+    return AnalyzeBatchResult(
+        selected_count=len(candidates),
+        processed_count=processed_count,
+        succeeded_count=succeeded_count,
+        failed_count=failed_count,
+        skipped_count=skipped_count,
+        elapsed_seconds=elapsed,
+        stop_reason=stop_reason,
+        items=items,
+    )
+
+
+def _call_analyze_one_pr(
+    *,
+    config: HarnessConfig,
+    pr_number: int,
+) -> AnalyzeOneResult:
+    return analyze_one_pr(config=config, pr_number=pr_number)
+
+
+def _queue_summary_for_candidate(
+    config: HarnessConfig,
+    candidate: AnalysisCandidate,
+) -> AnalysisQueueSummary | None:
+    with connect(config.storage.sqlite_path) as connection:
+        return get_analysis_queue_summary(
+            connection,
+            pr_number=candidate.github_pr_number,
+            upstream_branch=candidate.upstream_branch,
+        )
+
+
+def _analysis_result_failed(
+    *,
+    result: AnalyzeOneResult,
+    queue_summary: AnalysisQueueSummary | None,
+) -> bool:
+    if result.codex_result.timed_out or result.codex_result.exit_code != 0:
+        return True
+    return _queue_status(queue_summary) in {"NEEDS_RETRY", "FAILED_INFRA"}
+
+
+def _failure_message(
+    *,
+    result: AnalyzeOneResult,
+    queue_summary: AnalysisQueueSummary | None,
+) -> str:
+    if queue_summary is not None and queue_summary.last_error:
+        return queue_summary.last_error
+    if result.codex_result.timed_out:
+        return "Codex timed out."
+    return f"Codex exited with {result.codex_result.exit_code}."
+
+
+def _failed_batch_item(
+    *,
+    candidate: AnalysisCandidate,
+    queue_summary: AnalysisQueueSummary | None,
+    error: str,
+    run_id: str | None,
+    codex_exit_code: int | None,
+    timed_out: bool | None,
+    outcome: str = "failed",
+) -> AnalyzeBatchItemResult:
+    return AnalyzeBatchItemResult(
+        pr_number=candidate.github_pr_number,
+        title=candidate.title,
+        upstream_branch=candidate.upstream_branch,
+        initial_queue_status=candidate.queue_status,
+        final_queue_status=_queue_status(queue_summary),
+        outcome=outcome,
+        run_id=run_id,
+        codex_exit_code=codex_exit_code,
+        timed_out=timed_out,
+        error=error,
+        skip_reason=None,
+    )
+
+
+def _skipped_batch_items(
+    candidates: list[AnalysisCandidate],
+    *,
+    reason: str,
+) -> list[AnalyzeBatchItemResult]:
+    return [
+        AnalyzeBatchItemResult(
+            pr_number=candidate.github_pr_number,
+            title=candidate.title,
+            upstream_branch=candidate.upstream_branch,
+            initial_queue_status=candidate.queue_status,
+            final_queue_status=None,
+            outcome="skipped",
+            run_id=None,
+            codex_exit_code=None,
+            timed_out=None,
+            error=None,
+            skip_reason=reason,
+        )
+        for candidate in candidates
+    ]
+
+
+def _queue_status(queue_summary: AnalysisQueueSummary | None) -> str | None:
+    if queue_summary is None:
+        return None
+    return queue_summary.queue_status

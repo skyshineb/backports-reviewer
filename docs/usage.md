@@ -119,13 +119,36 @@ Preview analysis candidates:
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
 ```
 
+Analyze a bounded foreground batch:
+
+```sh
+.venv/bin/backport-harness --config config.yaml analyze --limit 5
+.venv/bin/backport-harness --config config.yaml analyze --limit 5 --max-runtime-minutes 30
+.venv/bin/backport-harness --config config.yaml analyze --limit 5 --fail-fast
+```
+
 Analyze one PR:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml analyze --pr 12345
 ```
 
-The one-PR analysis path prepares the public task bundle, locks the queue row, invokes Codex, captures stdout and stderr, validates `output/codex_result.json` when present, stores valid decisions/evidence/test runs, and updates queue state. Failures preserve task directories and logs for inspection.
+Batch analysis takes a candidate snapshot at command start, then processes up to
+the selected limit sequentially in priority order. The same PR is not reselected
+within the same command even if it becomes retryable. By default, a PR-level
+failure is recorded and the batch continues to the next selected PR. Use
+`--fail-fast` to stop after the first PR-level failure.
+
+`--max-runtime-minutes` is checked only before starting the next PR. It never
+kills an in-flight Codex run; per-PR timeouts still come from
+`codex.timeout_seconds`.
+
+Both batch and one-PR analysis prepare the public task bundle, lock the queue
+row, invoke Codex, capture stdout and stderr, validate
+`output/codex_result.json` when present, store valid decisions/evidence/test
+runs, and update queue state. Failures preserve task directories and logs for
+inspection. If interruption leaves a row in `CODEX_RUNNING`, run
+`recover-stale` before retrying.
 
 ## Recover and Retry
 
@@ -154,6 +177,10 @@ Generate reports from SQLite:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml report
+.venv/bin/backport-harness --config config.yaml report --view summary
+.venv/bin/backport-harness --config config.yaml report --view candidates --details
+.venv/bin/backport-harness --config config.yaml report --view inconclusive --queue-status NEEDS_RETRY --no-files
+.venv/bin/backport-harness --config config.yaml report --view audit --decision SOURCE_FIX_VERIFIED_ON_TARGET --limit 20 --no-files
 ```
 
 Reports are written to `reports.output_dir`:
@@ -164,6 +191,12 @@ Reports are written to `reports.output_dir`:
 - `full-audit.jsonl`
 
 Reports can be regenerated at any time. They do not require live GitHub access or Codex execution.
+
+Terminal views are available with `--view summary`, `--view candidates`,
+`--view inconclusive`, `--view discarded`, and `--view audit`. Filters include
+`--limit`, `--decision`, `--queue-status`, `--review-status`, and `--details`.
+When a view is requested, report files are regenerated first unless `--no-files`
+is supplied.
 
 ## Human Review State
 

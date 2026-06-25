@@ -16,8 +16,8 @@ history, private business logic, or private test results.
   evidence, test runs, and human review state in SQLite.
 - Lets operators list and inspect saved PRs before spending Codex time.
 - Prepares a clean public baseline worktree and task bundle for one PR.
-- Runs Codex for one selected PR, then validates the structured result before
-  storing any decision.
+- Runs Codex for one selected PR or a bounded foreground batch, then validates
+  each structured result before storing any decision.
 - Recovers stale runs, retries operational failures, and regenerates reports
   from SQLite.
 
@@ -80,13 +80,14 @@ All commands accept `--config config.yaml`; it defaults to `config.yaml`.
 .venv/bin/backport-harness --config config.yaml list-prs --limit 20
 .venv/bin/backport-harness --config config.yaml inspect --pr 12345
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
-.venv/bin/backport-harness --config config.yaml analyze --pr 12345
+.venv/bin/backport-harness --config config.yaml analyze --limit 5
 .venv/bin/backport-harness --config config.yaml report
+.venv/bin/backport-harness --config config.yaml report --view summary --no-files
 ```
 
-The implemented analysis path runs one selected PR at a time with
-`analyze --pr`. Use `analyze --dry-run --limit N` to preview which queued PRs
-should be analyzed next.
+Use `analyze --dry-run --limit N` to preview queued PRs. Use
+`analyze --limit N` to run a bounded sequential batch from that saved queue, or
+`analyze --pr N` for a single explicit PR.
 
 ## Commands
 
@@ -128,14 +129,27 @@ Preview and run analysis:
 ```sh
 .venv/bin/backport-harness --config config.yaml analyze --dry-run
 .venv/bin/backport-harness --config config.yaml analyze --dry-run --limit 5
+.venv/bin/backport-harness --config config.yaml analyze --limit 5
+.venv/bin/backport-harness --config config.yaml analyze --limit 5 --max-runtime-minutes 30
+.venv/bin/backport-harness --config config.yaml analyze --limit 5 --fail-fast
 .venv/bin/backport-harness --config config.yaml analyze --pr 12345
 ```
 
-`analyze --pr` creates the task bundle, locks the queue row, invokes Codex,
-captures stdout and stderr, validates `output/codex_result.json`, stores valid
-decisions and evidence, and preserves task output for inspection. Timeouts,
-non-zero exits, malformed JSON, and invalid evidence mark the queue retryable
-until the configured attempt limit is reached.
+`analyze --limit N` takes a candidate snapshot at command start and processes up
+to `N` queued PRs sequentially in priority order. It prints a terminal batch
+summary with processed PRs, failures, skipped items, final queue statuses,
+elapsed time, and the stop reason. By default the batch continues after a
+PR-level failure; `--fail-fast` stops after the first failure.
+
+`--max-runtime-minutes` is checked only between PRs. It does not stop an
+in-flight Codex run; per-PR timeouts still come from `codex.timeout_seconds`.
+
+`analyze --pr` uses the same per-PR path for one explicit PR. Analysis creates
+the task bundle, locks the queue row, invokes Codex, captures stdout and stderr,
+validates `output/codex_result.json`, stores valid decisions and evidence, and
+preserves task output for inspection. Timeouts, non-zero exits, malformed JSON,
+and invalid evidence mark the queue retryable until the configured attempt
+limit is reached.
 
 Recover stale runs and retry selected failures:
 
@@ -155,6 +169,9 @@ Generate reports and record human review state:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml report
+.venv/bin/backport-harness --config config.yaml report --view summary
+.venv/bin/backport-harness --config config.yaml report --view candidates --details --no-files
+.venv/bin/backport-harness --config config.yaml report --view inconclusive --queue-status NEEDS_RETRY --no-files
 .venv/bin/backport-harness --config config.yaml review --pr 12345 --status accepted_for_backport
 .venv/bin/backport-harness --config config.yaml review --pr 12345 --status backported --comment "Applied internally"
 ```
@@ -170,6 +187,12 @@ Generated report files:
 - `inconclusive.md`
 - `discarded.jsonl`
 - `full-audit.jsonl`
+
+Terminal report views are available with `--view summary`, `--view candidates`,
+`--view inconclusive`, `--view discarded`, and `--view audit`. Filters include
+`--limit`, `--decision`, `--queue-status`, `--review-status`, and `--details`.
+Use `--no-files` with a view to print from SQLite without rewriting report
+files.
 
 ## Troubleshooting
 
