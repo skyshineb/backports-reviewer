@@ -33,7 +33,7 @@ Initialize the SQLite database:
 .venv/bin/backport-harness --config config.yaml db init
 ```
 
-The default `config.yaml` stores state under `workspace/`, writes reports under `reports/`, uses public Apache Hudi upstream settings, and sets the default Codex and stale-run timeout to 7200 seconds.
+The default `config.yaml` stores state under `workspace/`, writes reports under `reports/`, uses public Apache Hudi upstream settings, sets the default Codex and stale-run timeout to 7200 seconds, and runs Codex with `medium` reasoning effort.
 
 ## Configuration
 
@@ -41,7 +41,7 @@ The important config sections are:
 
 - `github`: public upstream owner, repo, branches, token environment variable, delays, retries, and rate-limit behavior.
 - `local_repo`: public upstream clone location and public worktree directory.
-- `codex`: Codex command, execution mode, timeout, max attempts, and expected result file.
+- `codex`: Codex command, execution mode, timeout, max attempts, expected result file, and reasoning effort.
 - `analysis`: default batch limit and stale-run timeout.
 - `reports`: report output directory.
 - `storage`: SQLite path.

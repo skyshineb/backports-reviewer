@@ -163,6 +163,7 @@ codex:
   timeout_seconds: 7200
   max_attempts_per_pr: 2
   result_file: "output/codex_result.json"
+  reasoning_effort: "medium"
 
 analysis:
   default_limit: 5
@@ -180,6 +181,8 @@ storage:
 - Missing required config fields fail fast.
 - Defaults are applied where appropriate.
 - `timeout_seconds` defaults to 7200 seconds.
+- `reasoning_effort` defaults to `medium` and supports `low`, `medium`,
+  `high`, and `xhigh`.
 - GitHub token is read from environment variable configured by `token_env`.
 
 ---

@@ -7,9 +7,10 @@ Implement a Codex subprocess runner that executes one prepared analysis safely, 
 ## Implementation Scope
 
 - Create `backport_harness/codex_runner.py`.
-- Define `CodexRunRequest` with `prompt`, `cwd`, `timeout_seconds`, `output_result_path`, and optional `extra_env`.
+- Define `CodexRunRequest` with `prompt`, `cwd`, `timeout_seconds`,
+  `output_result_path`, optional `extra_env`, and configured reasoning effort.
 - Define `CodexRunResult` with session ID, exit code, timeout flag, stdout/stderr log paths, optional last-message path, start time, and finish time.
-- Invoke Codex as `codex exec -C <cwd> --dangerously-bypass-approvals-and-sandbox --json -o <temp-last-message-file> <prompt>`.
+- Invoke Codex as `codex exec -C <cwd> --dangerously-bypass-approvals-and-sandbox --json -o <temp-last-message-file> -c model_reasoning_effort="<configured-effort>" <prompt>`.
 - Store stdout and stderr in task output logs, not directly in SQLite.
 - Put the Codex `-o` last-message file outside the git worktree while running, then persist it into the task output directory after completion.
 - Spawn with `start_new_session=True`.
@@ -29,6 +30,8 @@ Implement a Codex subprocess runner that executes one prepared analysis safely, 
 - Non-zero exits and timeouts preserve logs and mark retryable or infra-failed state according to the state machine.
 - Task preparation or Codex spawn errors preserve logs, release the queue lock, and mark the attempt retryable or infra-failed according to the state machine.
 - Codex never receives GitHub token environment variables.
+- Codex receives an explicit `model_reasoning_effort` override and does not
+  depend on the operator's user-level Codex reasoning default.
 
 ## Affected Modules or Commands
 
@@ -43,6 +46,7 @@ Implement a Codex subprocess runner that executes one prepared analysis safely, 
 - Assert expected Codex argv.
 - Assert stdout/stderr logs are written.
 - Assert session ID is parsed from JSONL.
+- Assert configured reasoning effort is passed through the Codex argv.
 - Assert timeout kills the process group.
 - Assert GitHub credential variables are stripped and provider auth remains.
 - Assert queue/run status updates happen around execution and not inside a long transaction.

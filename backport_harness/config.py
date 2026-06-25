@@ -19,6 +19,8 @@ DEFAULT_ANALYSIS_LIMIT = 5
 DEFAULT_TARGET_LABEL = "0.15"
 DEFAULT_TARGET_REF = "origin/release-0.15.0"
 DEFAULT_TARGET_WORKTREE_SUFFIX = "015"
+DEFAULT_CODEX_REASONING_EFFORT = "medium"
+CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 
 TOKEN_FIELD_NAMES = {"token", "github_token", "access_token"}
 
@@ -59,6 +61,7 @@ class CodexConfig:
     timeout_seconds: int
     max_attempts_per_pr: int
     result_file: str
+    reasoning_effort: str = DEFAULT_CODEX_REASONING_EFFORT
 
 
 @dataclass(frozen=True)
@@ -197,6 +200,18 @@ def _load_target_ref_config(section: dict[str, Any]) -> TargetRefConfig:
 
 def _load_codex_config(data: dict[str, Any]) -> CodexConfig:
     section = _required_mapping(data, "codex")
+    reasoning_effort = _optional_str(
+        section,
+        "reasoning_effort",
+        DEFAULT_CODEX_REASONING_EFFORT,
+        "codex",
+    )
+    if reasoning_effort not in CODEX_REASONING_EFFORTS:
+        allowed = ", ".join(sorted(CODEX_REASONING_EFFORTS))
+        raise ValueError(
+            "Config value 'codex.reasoning_effort' must be one of "
+            f"{allowed}."
+        )
     return CodexConfig(
         command=_required_str(section, "command", "codex"),
         mode=_required_str(section, "mode", "codex"),
@@ -208,6 +223,7 @@ def _load_codex_config(data: dict[str, Any]) -> CodexConfig:
         ),
         max_attempts_per_pr=_required_int(section, "max_attempts_per_pr", "codex"),
         result_file=_required_str(section, "result_file", "codex"),
+        reasoning_effort=reasoning_effort,
     )
 
 
