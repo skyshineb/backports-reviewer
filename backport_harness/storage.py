@@ -60,6 +60,15 @@ class AnalysisCandidate:
 
 
 @dataclass(frozen=True)
+class AnalysisQueueSummary:
+    github_pr_number: int
+    upstream_branch: str
+    queue_status: str
+    attempts: int
+    last_error: str | None
+
+
+@dataclass(frozen=True)
 class AnalysisStart:
     pr_id: int
     analysis_run_id: int
@@ -532,6 +541,47 @@ def select_analysis_candidates(
         )
         for row in cursor.fetchall()
     ]
+
+
+def get_analysis_queue_summary(
+    connection: sqlite3.Connection,
+    *,
+    pr_number: int,
+    upstream_branch: str | None = None,
+) -> AnalysisQueueSummary | None:
+    where_clauses = ["prs.github_pr_number = ?"]
+    parameters: list[object] = [pr_number]
+    if upstream_branch is not None:
+        where_clauses.append("prs.upstream_branch = ?")
+        parameters.append(upstream_branch)
+
+    cursor = connection.execute(
+        f"""
+        SELECT
+            prs.github_pr_number,
+            prs.upstream_branch,
+            analysis_queue.status,
+            analysis_queue.attempts,
+            analysis_queue.last_error
+        FROM prs
+        JOIN analysis_queue ON analysis_queue.pr_id = prs.id
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY prs.upstream_branch ASC
+        LIMIT 1
+        """,
+        parameters,
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+
+    return AnalysisQueueSummary(
+        github_pr_number=int(row[0]),
+        upstream_branch=str(row[1]),
+        queue_status=str(row[2]),
+        attempts=int(row[3]),
+        last_error=row[4],
+    )
 
 
 def start_analysis_run(

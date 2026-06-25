@@ -48,29 +48,18 @@ class ReportGenerationResult:
     full_audit_count: int
 
 
+@dataclass(frozen=True)
+class CategorizedReportRows:
+    all_rows: list[ReportPullRequest]
+    candidates: list[ReportPullRequest]
+    inconclusive: list[ReportPullRequest]
+    discarded: list[ReportPullRequest]
+
+
 def generate_reports(*, sqlite_path: Path, output_dir: Path) -> ReportGenerationResult:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pull_requests: list[ReportPullRequest] = []
-    if sqlite_path.exists():
-        with connect(sqlite_path) as connection:
-            pull_requests = get_report_data(connection)
-
-    candidates = [
-        pull_request
-        for pull_request in pull_requests
-        if _latest_decision_value(pull_request) in BACKPORT_CANDIDATE_DECISIONS
-    ]
-    inconclusive = [
-        pull_request
-        for pull_request in pull_requests
-        if _is_inconclusive_report_row(pull_request)
-    ]
-    discarded = [
-        pull_request
-        for pull_request in pull_requests
-        if _latest_decision_value(pull_request) in DISCARDED_DECISIONS
-    ]
+    categories = categorize_report_rows(load_report_rows(sqlite_path))
 
     backport_candidates_path = output_dir / BACKPORT_CANDIDATES_FILENAME
     inconclusive_path = output_dir / INCONCLUSIVE_FILENAME
@@ -78,19 +67,19 @@ def generate_reports(*, sqlite_path: Path, output_dir: Path) -> ReportGeneration
     full_audit_path = output_dir / FULL_AUDIT_FILENAME
 
     backport_candidates_path.write_text(
-        _render_candidate_markdown(candidates),
+        _render_candidate_markdown(categories.candidates),
         encoding="utf-8",
     )
     inconclusive_path.write_text(
-        _render_inconclusive_markdown(inconclusive),
+        _render_inconclusive_markdown(categories.inconclusive),
         encoding="utf-8",
     )
     discarded_path.write_text(
-        _render_jsonl(_discarded_json_object(row) for row in discarded),
+        _render_jsonl(_discarded_json_object(row) for row in categories.discarded),
         encoding="utf-8",
     )
     full_audit_path.write_text(
-        _render_jsonl(_full_audit_json_object(row) for row in pull_requests),
+        _render_jsonl(_full_audit_json_object(row) for row in categories.all_rows),
         encoding="utf-8",
     )
 
@@ -100,11 +89,129 @@ def generate_reports(*, sqlite_path: Path, output_dir: Path) -> ReportGeneration
         inconclusive_path=inconclusive_path,
         discarded_path=discarded_path,
         full_audit_path=full_audit_path,
-        backport_candidates_count=len(candidates),
-        inconclusive_count=len(inconclusive),
-        discarded_count=len(discarded),
-        full_audit_count=len(pull_requests),
+        backport_candidates_count=len(categories.candidates),
+        inconclusive_count=len(categories.inconclusive),
+        discarded_count=len(categories.discarded),
+        full_audit_count=len(categories.all_rows),
     )
+
+
+def load_report_rows(sqlite_path: Path) -> list[ReportPullRequest]:
+    if not sqlite_path.exists():
+        return []
+
+    with connect(sqlite_path) as connection:
+        return get_report_data(connection)
+
+
+def categorize_report_rows(
+    pull_requests: list[ReportPullRequest],
+) -> CategorizedReportRows:
+    candidates = [
+        pull_request
+        for pull_request in pull_requests
+        if latest_decision_value(pull_request) in BACKPORT_CANDIDATE_DECISIONS
+    ]
+    inconclusive = [
+        pull_request
+        for pull_request in pull_requests
+        if is_inconclusive_report_row(pull_request)
+    ]
+    discarded = [
+        pull_request
+        for pull_request in pull_requests
+        if latest_decision_value(pull_request) in DISCARDED_DECISIONS
+    ]
+    return CategorizedReportRows(
+        all_rows=pull_requests,
+        candidates=candidates,
+        inconclusive=inconclusive,
+        discarded=discarded,
+    )
+
+
+def report_rows_for_view(
+    categories: CategorizedReportRows,
+    *,
+    view: str,
+) -> list[ReportPullRequest]:
+    if view == "summary":
+        return categories.all_rows
+    if view == "candidates":
+        return categories.candidates
+    if view == "inconclusive":
+        return categories.inconclusive
+    if view == "discarded":
+        return categories.discarded
+    if view == "audit":
+        return categories.all_rows
+    raise ValueError(f"Unknown report view: {view}")
+
+
+def filter_report_rows(
+    rows: list[ReportPullRequest],
+    *,
+    decision: str | None = None,
+    queue_status: str | None = None,
+    review_status: str | None = None,
+    limit: int | None = None,
+) -> list[ReportPullRequest]:
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be positive.")
+
+    filtered = []
+    for row in rows:
+        if decision is not None and report_decision_label(row) != decision:
+            continue
+        if queue_status is not None and row.queue_status != queue_status:
+            continue
+        if review_status is not None and human_review_status(row) != review_status:
+            continue
+        filtered.append(row)
+
+    if limit is not None:
+        return filtered[:limit]
+    return filtered
+
+
+def latest_decision_value(pull_request: ReportPullRequest) -> str | None:
+    if pull_request.latest_decision is None:
+        return None
+    return pull_request.latest_decision.decision
+
+
+def report_decision_label(pull_request: ReportPullRequest) -> str:
+    return latest_decision_value(pull_request) or pull_request.queue_status or "-"
+
+
+def report_decision_confidence(pull_request: ReportPullRequest) -> str:
+    return _latest_decision_field(pull_request, "confidence")
+
+
+def report_decision_reason(pull_request: ReportPullRequest) -> str:
+    return _latest_decision_field(pull_request, "reason")
+
+
+def report_human_action(pull_request: ReportPullRequest) -> str:
+    return _latest_decision_field(pull_request, "human_action")
+
+
+def report_evidence_summary(decision: ReportDecision | None) -> str:
+    return _evidence_summary(decision)
+
+
+def human_review_status(pull_request: ReportPullRequest) -> str:
+    return _human_review_status(pull_request)
+
+
+def is_inconclusive_report_row(pull_request: ReportPullRequest) -> bool:
+    decision = latest_decision_value(pull_request)
+    if decision in INCONCLUSIVE_DECISIONS:
+        return True
+    return decision is None and pull_request.queue_status in {
+        "FAILED_INFRA",
+        "NEEDS_RETRY",
+    }
 
 
 def _render_candidate_markdown(pull_requests: list[ReportPullRequest]) -> str:
@@ -128,7 +235,7 @@ def _render_candidate_markdown(pull_requests: list[ReportPullRequest]) -> str:
                 _markdown_pr_link(pull_request),
                 pull_request.upstream_branch,
                 pull_request.merged_at,
-                _latest_decision_value(pull_request) or "-",
+                latest_decision_value(pull_request) or "-",
                 _latest_decision_field(pull_request, "confidence"),
                 _latest_decision_field(pull_request, "reason"),
                 _evidence_summary(pull_request.latest_decision),
@@ -161,7 +268,7 @@ def _render_inconclusive_markdown(pull_requests: list[ReportPullRequest]) -> str
                 _markdown_pr_link(pull_request),
                 pull_request.upstream_branch,
                 pull_request.merged_at,
-                _latest_decision_value(pull_request) or pull_request.queue_status or "-",
+                latest_decision_value(pull_request) or pull_request.queue_status or "-",
                 _latest_decision_field(pull_request, "confidence"),
                 _latest_decision_field(pull_request, "reason"),
                 _evidence_summary(pull_request.latest_decision),
@@ -281,22 +388,6 @@ def _human_review_json_object(
         "comment": pull_request.human_review.comment,
         "updated_at": pull_request.human_review.updated_at,
     }
-
-
-def _is_inconclusive_report_row(pull_request: ReportPullRequest) -> bool:
-    decision = _latest_decision_value(pull_request)
-    if decision in INCONCLUSIVE_DECISIONS:
-        return True
-    return decision is None and pull_request.queue_status in {
-        "FAILED_INFRA",
-        "NEEDS_RETRY",
-    }
-
-
-def _latest_decision_value(pull_request: ReportPullRequest) -> str | None:
-    if pull_request.latest_decision is None:
-        return None
-    return pull_request.latest_decision.decision
 
 
 def _latest_decision_field(pull_request: ReportPullRequest, field_name: str) -> str:

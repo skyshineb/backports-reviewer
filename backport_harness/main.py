@@ -6,12 +6,15 @@ from typing import Optional
 import typer
 
 from backport_harness import __version__
-from backport_harness.analysis_runner import analyze_one_pr
-from backport_harness.commands.analyze import render_analyze_dry_run
+from backport_harness.analysis_runner import analyze_one_pr, analyze_pr_batch
+from backport_harness.commands.analyze import (
+    render_analyze_batch_summary,
+    render_analyze_dry_run,
+)
 from backport_harness.commands.inspect_pr import render_inspect_pr
 from backport_harness.commands.list_prs import VALID_ORDER_BY, render_list_prs
 from backport_harness.commands.recover_stale import render_recover_stale
-from backport_harness.commands.report import write_reports
+from backport_harness.commands.report import REPORT_VIEWS, render_report_view, write_reports
 from backport_harness.commands.review import render_review
 from backport_harness.commands.retry import render_retry
 from backport_harness.config import DEFAULT_ANALYSIS_LIMIT
@@ -196,12 +199,40 @@ def analyze(
         "--dry-run",
         help="Show selected PRs without invoking Codex.",
     ),
+    max_runtime_minutes: Optional[float] = typer.Option(
+        None,
+        "--max-runtime-minutes",
+        help="Stop before starting the next PR once elapsed runtime exceeds this cap.",
+    ),
+    fail_fast: bool = typer.Option(
+        False,
+        "--fail-fast",
+        help="Stop batch analysis after the first PR-level failure.",
+    ),
 ) -> None:
     """Plan analysis candidates from the local SQLite queue."""
     if pr is not None and pr < 1:
         raise typer.BadParameter("pr must be a positive integer.")
     if pr is not None and dry_run:
         raise typer.BadParameter("--pr cannot be combined with --dry-run.")
+    if pr is not None and limit is not None:
+        raise typer.BadParameter("--pr cannot be combined with --limit.")
+    if pr is not None and max_runtime_minutes is not None:
+        raise typer.BadParameter(
+            "--pr cannot be combined with --max-runtime-minutes."
+        )
+    if pr is not None and fail_fast:
+        raise typer.BadParameter("--pr cannot be combined with --fail-fast.")
+    if dry_run and max_runtime_minutes is not None:
+        raise typer.BadParameter(
+            "--dry-run cannot be combined with --max-runtime-minutes."
+        )
+    if dry_run and fail_fast:
+        raise typer.BadParameter("--dry-run cannot be combined with --fail-fast.")
+    if limit is not None and limit < 1:
+        raise typer.BadParameter("limit must be a positive integer.")
+    if max_runtime_minutes is not None and max_runtime_minutes <= 0:
+        raise typer.BadParameter("max-runtime-minutes must be positive.")
 
     if pr is not None:
         config = _require_config(ctx)
@@ -217,17 +248,30 @@ def analyze(
         )
         return
 
-    if not dry_run:
-        raise typer.BadParameter("Use --dry-run or --pr.")
-
     resolved_limit = _resolve_analysis_limit(ctx) if limit is None else limit
-    if resolved_limit < 1:
-        raise typer.BadParameter("limit must be a positive integer.")
 
-    render_analyze_dry_run(
-        sqlite_path=_resolve_sqlite_path(ctx),
-        limit=resolved_limit,
-    )
+    if dry_run:
+        render_analyze_dry_run(
+            sqlite_path=_resolve_sqlite_path(ctx),
+            limit=resolved_limit,
+        )
+        return
+
+    if limit is None:
+        raise typer.BadParameter("Use --limit for batch analysis, --dry-run, or --pr.")
+
+    config = _require_config(ctx)
+    try:
+        batch_result = analyze_pr_batch(
+            config=config,
+            limit=resolved_limit,
+            max_runtime_minutes=max_runtime_minutes,
+            fail_fast=fail_fast,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    render_analyze_batch_summary(result=batch_result)
 
 
 @app.command("prepare")
@@ -279,22 +323,87 @@ def prepare_bundle(
 
 
 @app.command("report")
-def report(ctx: typer.Context) -> None:
+def report(
+    ctx: typer.Context,
+    view: Optional[str] = typer.Option(
+        None,
+        "--view",
+        help="Terminal view to print: summary, candidates, inconclusive, discarded, or audit.",
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Maximum number of terminal report rows to print.",
+    ),
+    decision: Optional[str] = typer.Option(
+        None,
+        "--decision",
+        help="Filter terminal report rows by latest decision.",
+    ),
+    queue_status: Optional[str] = typer.Option(
+        None,
+        "--queue-status",
+        help="Filter terminal report rows by queue status.",
+    ),
+    review_status: Optional[str] = typer.Option(
+        None,
+        "--review-status",
+        help="Filter terminal report rows by latest human review status.",
+    ),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        help="Include detailed terminal report columns.",
+    ),
+    no_files: bool = typer.Option(
+        False,
+        "--no-files",
+        help="Print the terminal view without regenerating report files.",
+    ),
+) -> None:
     """Generate review reports from the local SQLite database."""
-    config = _require_config(ctx)
-    result = write_reports(
-        sqlite_path=config.storage.sqlite_path,
-        output_dir=config.reports.output_dir,
-    )
+    if view is not None and view not in REPORT_VIEWS:
+        allowed = ", ".join(sorted(REPORT_VIEWS))
+        raise typer.BadParameter(f"view must be one of: {allowed}.")
+    if limit is not None and limit < 1:
+        raise typer.BadParameter("limit must be a positive integer.")
+    if view is None and no_files:
+        raise typer.BadParameter("--no-files requires --view.")
+    if view is None and (
+        limit is not None
+        or decision is not None
+        or queue_status is not None
+        or review_status is not None
+        or details
+    ):
+        raise typer.BadParameter("Report view filters require --view.")
 
-    typer.echo(f"Generated reports in {result.output_dir}")
-    typer.echo(
-        f"- {result.backport_candidates_path}: "
-        f"{result.backport_candidates_count} row(s)"
-    )
-    typer.echo(f"- {result.inconclusive_path}: {result.inconclusive_count} row(s)")
-    typer.echo(f"- {result.discarded_path}: {result.discarded_count} row(s)")
-    typer.echo(f"- {result.full_audit_path}: {result.full_audit_count} row(s)")
+    config = _require_config(ctx)
+    if not no_files:
+        result = write_reports(
+            sqlite_path=config.storage.sqlite_path,
+            output_dir=config.reports.output_dir,
+        )
+
+        typer.echo(f"Generated reports in {result.output_dir}")
+        typer.echo(
+            f"- {result.backport_candidates_path}: "
+            f"{result.backport_candidates_count} row(s)"
+        )
+        typer.echo(f"- {result.inconclusive_path}: {result.inconclusive_count} row(s)")
+        typer.echo(f"- {result.discarded_path}: {result.discarded_count} row(s)")
+        typer.echo(f"- {result.full_audit_path}: {result.full_audit_count} row(s)")
+
+    if view is not None:
+        render_report_view(
+            sqlite_path=config.storage.sqlite_path,
+            view=view,
+            limit=limit,
+            decision=decision,
+            queue_status=queue_status,
+            review_status=review_status,
+            details=details,
+        )
 
 
 @app.command("review")
