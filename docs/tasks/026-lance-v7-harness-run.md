@@ -254,3 +254,35 @@ Scan `main` in date windows:
   `c33002e Run Lance v7 target-ref harness pilot`.
 - Pushed branch `task/026-lance-v7-harness-run` to origin.
 - Created GitHub PR: `https://github.com/skyshineb/backports-reviewer/pull/28`.
+- Resumed the Lance priority queue run on `2026-06-25` from branch
+  `task/026-lance-v7-harness-run`.
+- Ran `recover-stale`: recovered 0 stale Codex runs.
+- Ran `analyze --dry-run --limit 5`: confirmed the next queued PRs were
+  #6957, #6965, #6953, #6620, and #6989.
+- Ran `analyze --pr 6957` and `inspect --pr 6957`: Codex exited 0 without
+  timeout; result validated as `MASTER_FIX_VERIFIED_ON_015` / `very_high`;
+  queue status `REPORTABLE`.
+- Ran `analyze --pr 6965` and `inspect --pr 6965`: Codex exited 0 without
+  timeout; result validated as `MASTER_FIX_VERIFIED_ON_015` / `very_high`;
+  queue status `REPORTABLE`.
+- Started `analyze --pr 6953`; after it was already running, operator
+  direction changed to stop after two more PRs and check results.
+- Ran `inspect --pr 6953`: Codex exited 0 without timeout; result validated as
+  `DISCARDED_NON_BUGFIX` / `medium`; queue status `DONE`.
+- Ran `analyze --pr 6620` and `inspect --pr 6620`: Codex exited 0 without
+  timeout; result validated as `DISCARDED_NON_BUGFIX` / `medium`; queue status
+  `DONE`.
+- Stopped analysis before #6989 per operator direction.
+- Ran `recover-stale`: recovered 0 stale Codex runs.
+- Ran `report`: generated `reports/lance-v7/` with 3 backport candidates, 0
+  inconclusive rows, 2 discarded rows, and 242 full-audit rows.
+- Queried Lance queue and decision counts after the stopped run:
+  - `REPORTABLE`: 3
+  - `DONE`: 2
+  - `QUEUED_FOR_ANALYSIS`: 237
+  - priority 20 remaining queued: 81
+  - priority 50 remaining queued: 3
+  - priority 100 remaining queued: 153
+  - decision `MASTER_FIX_VERIFIED_ON_015`: 3
+  - decision `DISCARDED_NON_BUGFIX`: 2
+- Next queued PR after the stopped run is #6989.
