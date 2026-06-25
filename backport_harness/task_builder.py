@@ -15,7 +15,7 @@ from backport_harness.security import (
 )
 from backport_harness.storage import InspectedPullRequest, connect
 from backport_harness.storage import get_pull_request_inspection
-from backport_harness.worktree_manager import prepare_oss_015_worktree
+from backport_harness.worktree_manager import prepare_target_worktree
 
 
 class TaskBundleError(RuntimeError):
@@ -52,7 +52,7 @@ def build_task_bundle(
     if not pull_request.merged_commit_sha:
         raise TaskBundleError(f"Saved PR #{pr_number} has no merged commit SHA.")
 
-    worktree_path = prepare_oss_015_worktree(config, pr_number=pr_number)
+    worktree_path = prepare_target_worktree(config, pr_number=pr_number)
     diff_text = _get_pr_diff(config, pull_request.merged_commit_sha)
 
     if task_dir.exists():
@@ -192,10 +192,11 @@ def _instructions_for(
 
 - PR number: `{pull_request.github_pr_number}`
 - Target branch: `{pull_request.target_branch}`
+- Configured public target ref: `{config.local_repo.target_ref.label}` (`{config.local_repo.target_ref.ref}`)
 - PR metadata file: `pr.json`
 - Changed files file: `files_changed.json`
 - Public PR diff file: `pr.diff`
-- Public OSS 0.15 worktree: `{worktree_path}`
+- Configured public target-ref worktree: `{worktree_path}`
 - Required result path: `{config.codex.result_file}`
 
 {prompt_template}

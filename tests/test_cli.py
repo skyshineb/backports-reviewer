@@ -1008,13 +1008,13 @@ def test_prepare_command_passes_pr_to_worktree_manager(
     write_valid_config(config_path)
     calls = []
 
-    def fake_prepare_oss_015_worktree(config, *, pr_number):
+    def fake_prepare_target_worktree(config, *, pr_number):
         calls.append((config, pr_number))
         return worktree_path
 
     monkeypatch.setattr(
-        "backport_harness.main.prepare_oss_015_worktree",
-        fake_prepare_oss_015_worktree,
+        "backport_harness.main.prepare_target_worktree",
+        fake_prepare_target_worktree,
     )
 
     result = runner.invoke(
@@ -1059,12 +1059,12 @@ def test_prepare_command_reports_manager_errors(
     config_path = tmp_path / "config.yaml"
     write_valid_config(config_path)
 
-    def fake_prepare_oss_015_worktree(config, *, pr_number):
+    def fake_prepare_target_worktree(config, *, pr_number):
         raise RuntimeError("git failed")
 
     monkeypatch.setattr(
-        "backport_harness.main.prepare_oss_015_worktree",
-        fake_prepare_oss_015_worktree,
+        "backport_harness.main.prepare_target_worktree",
+        fake_prepare_target_worktree,
     )
 
     result = runner.invoke(

@@ -13,11 +13,11 @@ from backport_harness.security import (
     validate_safe_stale_worktree_removal,
 )
 
-
-OSS_015_REF = "origin/release-0.15.0"
-
-
 def prepare_oss_015_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
+    return prepare_target_worktree(config, pr_number=pr_number)
+
+
+def prepare_target_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
     if pr_number < 1:
         raise ValueError("pr_number must be a positive integer.")
 
@@ -26,7 +26,8 @@ def prepare_oss_015_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
 
     repo_dir = config.local_repo.repo_dir
     worktree_dir = config.local_repo.worktree_dir
-    target = worktree_dir / f"pr-{pr_number}-015"
+    target_ref = config.local_repo.target_ref
+    target = worktree_dir / f"pr-{pr_number}-{target_ref.worktree_suffix}"
     validate_public_path(target, config.security.forbidden_private_prefixes)
     validate_safe_child_path(target, worktree_dir)
     validate_no_path_overlap(
@@ -60,7 +61,7 @@ def prepare_oss_015_worktree(config: HarnessConfig, *, pr_number: int) -> Path:
             "add",
             "--detach",
             str(target),
-            OSS_015_REF,
+            target_ref.ref,
         ]
     )
     return target

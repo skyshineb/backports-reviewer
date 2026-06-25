@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from backport_harness.config import (
     ReportsConfig,
     SecurityConfig,
     StorageConfig,
+    TargetRefConfig,
 )
 from backport_harness.git_runner import GitResult
 from backport_harness.repo_manager import ensure_upstream_repo
@@ -80,6 +82,66 @@ def test_ensure_upstream_repo_checks_remote_and_fetches_existing_repo(
             "origin",
             "master",
             "release-0.15.0",
+            "--prune",
+        ],
+    ]
+
+
+def test_ensure_upstream_repo_fetches_configured_tag_target_ref(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config = make_config(tmp_path)
+    config = replace(
+        config,
+        github=replace(config.github, branches=["main"]),
+        local_repo=replace(
+            config.local_repo,
+            upstream_url="https://github.com/lance-format/lance.git",
+            target_ref=TargetRefConfig(
+                label="v7.0.0",
+                ref="refs/tags/v7.0.0",
+                worktree_suffix="v7.0.0",
+            ),
+        ),
+    )
+    calls = []
+
+    def fake_run_git(args):
+        calls.append(args)
+        return GitResult(args=args, stdout="", stderr="")
+
+    monkeypatch.setattr("backport_harness.repo_manager.run_git", fake_run_git)
+
+    ensure_upstream_repo(config)
+
+    assert calls == [
+        [
+            "git",
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            config.local_repo.upstream_url,
+            str(config.local_repo.repo_dir),
+        ],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "fetch",
+            "--filter=blob:none",
+            "origin",
+            "main",
+            "--prune",
+        ],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "fetch",
+            "--filter=blob:none",
+            "origin",
+            "refs/tags/v7.0.0:refs/tags/v7.0.0",
             "--prune",
         ],
     ]

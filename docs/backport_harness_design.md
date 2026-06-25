@@ -4,12 +4,19 @@
 
 The Backport Harness is a semi-automated system for detecting upstream open-source bugfixes that may need to be backported to a private fork.
 
-The system monitors public GitHub pull requests merged into two upstream branches:
+By default, the system monitors public GitHub pull requests merged into two
+upstream branches:
 
 - `master`
 - `0.15`
 
 The private fork is based on upstream `0.15`, but the harness must not access the private fork. The harness works only with the public upstream repository and the public upstream `0.15` branch. It produces a human review queue for engineers who will manually check and backport relevant fixes into the private fork.
+
+The same harness may also be configured for another public upstream repository,
+upstream branch, and public target ref when running public-only candidate
+analysis outside the default Hudi workflow. In those runs, the configured target
+ref replaces the default `0.15` worktree source, while the security boundary
+remains unchanged.
 
 ## 2. Core idea
 
@@ -26,8 +33,10 @@ Codex and the harness may access:
 
 - Public upstream GitHub PR metadata.
 - Public upstream PR diffs.
-- Public upstream `master` branch.
-- Public upstream `0.15` branch.
+- Public upstream source branches configured for scanning, such as `master` or
+  `main`.
+- Public upstream target refs configured for analysis, such as `0.15` or a
+  release tag.
 - Local public OSS worktrees.
 - Public test logs generated during analysis.
 
@@ -151,7 +160,7 @@ flowchart TD
     DB --> Queue[Analysis Queue]
 
     Queue --> TaskBuilder[Task Bundle Builder]
-    TaskBuilder --> Worktree[Public OSS 0.15 Worktree]
+    TaskBuilder --> Worktree[Public OSS target-ref worktree]
     TaskBuilder --> Codex[Codex Worker]
 
     Codex --> Result[codex_result.json<br/>notes.md<br/>logs<br/>patches]
@@ -239,7 +248,7 @@ Responsibilities:
 
 - Clone upstream repo if absent.
 - Fetch upstream branches.
-- Create clean per-PR public OSS `0.15` worktree.
+- Create clean per-PR public OSS target-ref worktree.
 - Remove worktrees after analysis if configured.
 - Ensure private repo paths are never used.
 
@@ -253,7 +262,7 @@ workspace/tasks/pr-12345/
   files_changed.json
   pr.diff
   instructions.md
-  oss_015_worktree/
+  target_worktree/
   output/
     codex_result.json
     notes.md

@@ -2,7 +2,7 @@
 
 ## Security Boundary
 
-Use only public upstream data included in the task bundle and the public OSS 0.15 worktree.
+Use only public upstream data included in the task bundle and the configured public target-ref worktree.
 Do not use, request, infer, or reference private fork code, private patches, private repository history, private test data, private business logic, or private paths.
 If a question cannot be answered from public upstream context, say so and choose `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`.
 
@@ -11,11 +11,12 @@ If a question cannot be answered from public upstream context, say so and choose
 - PR metadata: `pr.json`
 - Changed files: `files_changed.json`
 - Public PR diff: `pr.diff`
-- Public OSS 0.15 worktree from the rendered task context line `Public OSS 0.15 worktree: <path>`
+- Configured public target ref from the rendered task context line `Configured public target ref: <label> (<ref>)`
+- Configured public target-ref worktree from the rendered task context line `Configured public target-ref worktree: <path>`
 
 ## Responsibility
 
-Decide whether this PR merged into upstream `0.15` is a real bugfix candidate for human backport review.
+Decide whether this PR merged into the configured public target branch is a real bugfix candidate for human backport review.
 Do not silently discard uncertain cases.
 
 ## No-Test Policy
@@ -33,7 +34,7 @@ Save every test or command log under `output/logs/`.
 
 ## Modification Boundaries
 
-Only edit files in the public OSS 0.15 worktree that are needed for transplant or fix verification.
+Only edit files in the configured public target-ref worktree that are needed for transplant or fix verification.
 Do not modify task input files, including `pr.json`, `files_changed.json`, and `pr.diff`.
 Write any generated patch under `output/patches/`.
 Write human-readable notes to `output/notes.md`.
@@ -88,7 +89,7 @@ The JSON object must include these top-level fields:
 `confidence` must be one of:
 
 - `very_high`: test fails before fix and passes after adapted fix.
-- `high`: regression test reproduces the bug on OSS 0.15.
+- `high`: regression test reproduces the bug on the configured public target ref.
 - `medium`: relevant code/logic exists but no test proof.
 - `low`: weak relevance signals only.
 - `unknown`: inconclusive.
@@ -99,6 +100,8 @@ The JSON object must include these top-level fields:
 - `reason`: non-empty string.
 - `affected_public_paths`: array of repository-relative public paths.
 - `missing_public_paths`: array of repository-relative public paths.
+
+The `applies_to_oss_015` field retains its historical name; interpret it as applicability to the configured public target ref for this task.
 
 `test_transplant` must be an object with:
 
@@ -145,11 +148,11 @@ Use null only for fields that are explicitly unavailable because a test, transpl
 
 Decision-specific requirements:
 
-- `DIRECT_015_BUGFIX`: require `applicability.applies_to_oss_015: true` and `classification`, `code_presence`, or `logic_match` evidence showing this is a public OSS 0.15 bugfix candidate.
+- `DIRECT_015_BUGFIX`: require `applicability.applies_to_oss_015: true` and `classification`, `code_presence`, or `logic_match` evidence showing this is a configured public target-ref bugfix candidate.
 - `MASTER_FIX_VERIFIED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, at least one `test_failure` evidence item, and at least one `test_pass` evidence item.
 - `MASTER_REPRODUCED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
 - `MASTER_POSSIBLY_APPLICABLE`: require `applicability.applies_to_oss_015: true` or null with a reason, plus `code_presence` or `logic_match` evidence.
-- `MASTER_NOT_APPLICABLE`: require `applicability.applies_to_oss_015: false` and `non_applicability` evidence for absent file, class, module, feature, bug introduction after 0.15, or fix behavior already present in public OSS 0.15.
+- `MASTER_NOT_APPLICABLE`: require `applicability.applies_to_oss_015: false` and `non_applicability` evidence for absent file, class, module, feature, bug introduction after the configured target ref, or fix behavior already present in the configured public target ref.
 - `DISCARDED_NON_BUGFIX`, `DISCARDED_DOCS_ONLY`, `DISCARDED_CI_ONLY`, and `DISCARDED_RELEASE_ONLY`: require `classification` evidence.
 - `INCONCLUSIVE` and `NEEDS_HUMAN_REVIEW`: require `uncertainty` evidence and a clear `applicability.reason`.
 - `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or input file that explains the tooling or environment failure.

@@ -23,6 +23,19 @@ def test_valid_master_fix_verified_result(tmp_path: Path) -> None:
     assert outcome.issues == ()
 
 
+def test_target_branch_must_match_expected_branch(tmp_path: Path) -> None:
+    task_dir = _write_result(tmp_path, _valid_result(target_branch="main"))
+
+    outcome = validate_codex_result_file(
+        task_dir=task_dir,
+        result_path=task_dir / "output" / "codex_result.json",
+        expected_target_branch="master",
+    )
+
+    assert outcome.valid is False
+    assert "does not match saved PR target branch" in outcome.summary
+
+
 def test_missing_result_file_is_invalid(tmp_path: Path) -> None:
     task_dir = tmp_path / "task"
 

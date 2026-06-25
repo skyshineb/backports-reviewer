@@ -169,7 +169,7 @@ class Evidence(CodexResultModel):
 class CodexResult(CodexResultModel):
     schema_version: Literal[1]
     pr_number: int
-    target_branch: Literal["master", "0.15"]
+    target_branch: str = Field(min_length=1)
     decision: Decision
     confidence: Confidence
     summary: str = Field(min_length=1)

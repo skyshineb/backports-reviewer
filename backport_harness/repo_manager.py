@@ -36,7 +36,11 @@ def ensure_upstream_repo(config: HarnessConfig) -> Path:
     else:
         _verify_existing_repo_remote(repo_dir, config.local_repo.upstream_url)
 
-    _fetch_configured_branches(repo_dir, config.github.branches)
+    _fetch_configured_refs(
+        repo_dir,
+        branches=config.github.branches,
+        target_ref=config.local_repo.target_ref.ref,
+    )
     return repo_dir
 
 
@@ -53,8 +57,17 @@ def _verify_existing_repo_remote(repo_dir: Path, expected_url: str) -> None:
         )
 
 
-def _fetch_configured_branches(repo_dir: Path, branches: list[str]) -> None:
+def _fetch_configured_refs(
+    repo_dir: Path,
+    *,
+    branches: list[str],
+    target_ref: str,
+) -> None:
     remote_branches = [_remote_branch_name(branch) for branch in branches]
+    target_branch = _target_remote_branch_name(target_ref)
+    if target_branch is not None and target_branch not in remote_branches:
+        remote_branches.append(target_branch)
+
     run_git(
         [
             "git",
@@ -68,6 +81,37 @@ def _fetch_configured_branches(repo_dir: Path, branches: list[str]) -> None:
         ]
     )
 
+    target_tag_refspec = _target_tag_refspec(target_ref)
+    if target_tag_refspec is not None:
+        run_git(
+            [
+                "git",
+                "-C",
+                str(repo_dir),
+                "fetch",
+                "--filter=blob:none",
+                "origin",
+                target_tag_refspec,
+                "--prune",
+            ]
+        )
+
 
 def _remote_branch_name(branch: str) -> str:
     return BRANCH_ALIASES.get(branch, branch)
+
+
+def _target_remote_branch_name(target_ref: str) -> str | None:
+    if target_ref.startswith("origin/"):
+        return target_ref.removeprefix("origin/")
+    if target_ref.startswith("refs/heads/"):
+        return target_ref.removeprefix("refs/heads/")
+    if target_ref.startswith("refs/tags/"):
+        return None
+    return target_ref
+
+
+def _target_tag_refspec(target_ref: str) -> str | None:
+    if not target_ref.startswith("refs/tags/"):
+        return None
+    return f"{target_ref}:{target_ref}"
