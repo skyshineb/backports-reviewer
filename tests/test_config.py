@@ -6,9 +6,6 @@ from backport_harness.config import (
     DEFAULT_CODEX_REASONING_EFFORT,
     DEFAULT_CODEX_TIMEOUT_SECONDS,
     DEFAULT_STALE_TIMEOUT_SECONDS,
-    DEFAULT_TARGET_LABEL,
-    DEFAULT_TARGET_REF,
-    DEFAULT_TARGET_WORKTREE_SUFFIX,
     load_config,
 )
 
@@ -22,6 +19,8 @@ github:
   branches:
     - master
     - "0.15"
+  branch_ref_map:
+    "0.15": release-0.15.0
   token_env: GITHUB_TOKEN
 
 local_repo:
@@ -59,10 +58,11 @@ def test_load_config_returns_typed_config(tmp_path: Path) -> None:
     assert config.github.owner == "apache"
     assert config.github.repo == "hudi"
     assert config.github.branches == ["master", "0.15"]
+    assert config.github.branch_ref_map == {"0.15": "release-0.15.0"}
     assert config.local_repo.upstream_url == "https://github.com/apache/hudi.git"
-    assert config.local_repo.target_ref.label == DEFAULT_TARGET_LABEL
-    assert config.local_repo.target_ref.ref == DEFAULT_TARGET_REF
-    assert config.local_repo.target_ref.worktree_suffix == DEFAULT_TARGET_WORKTREE_SUFFIX
+    assert config.local_repo.target_ref.label == "0.15"
+    assert config.local_repo.target_ref.ref == "origin/release-0.15.0"
+    assert config.local_repo.target_ref.worktree_suffix == "015"
 
 
 def test_load_config_reads_custom_target_ref(tmp_path: Path) -> None:

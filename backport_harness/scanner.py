@@ -91,8 +91,9 @@ def _scan_branch(
                 create_analysis_queue_row_if_missing(
                     connection,
                     pr_id,
-                    target_branch=pull_request.base_ref,
+                    upstream_branch=pull_request.base_ref,
                     title=pull_request.title,
+                    target_ref_label=config.local_repo.target_ref.label,
                 )
             prs_saved += 1
 

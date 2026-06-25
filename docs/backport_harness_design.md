@@ -4,26 +4,24 @@
 
 The Backport Harness is a semi-automated system for detecting upstream open-source bugfixes that may need to be backported to a private fork.
 
-By default, the system monitors public GitHub pull requests merged into two
-upstream branches:
+The system monitors public GitHub pull requests merged into configured public
+upstream branches and compares source-branch fixes against a configured public
+target ref.
 
-- `master`
-- `0.15`
+The harness must not access the private fork. It works only with the public
+upstream repository, public upstream branches, and a public target ref such as a
+release branch or tag. It produces a human review queue for engineers who will
+manually check and backport relevant fixes elsewhere.
 
-The private fork is based on upstream `0.15`, but the harness must not access the private fork. The harness works only with the public upstream repository and the public upstream `0.15` branch. It produces a human review queue for engineers who will manually check and backport relevant fixes into the private fork.
-
-The same harness may also be configured for another public upstream repository,
-upstream branch, and public target ref when running public-only candidate
-analysis outside the default Hudi workflow. In those runs, the configured target
-ref replaces the default `0.15` worktree source, while the security boundary
-remains unchanged.
+The default `config.yaml` is the public Lance `main` to `v7.0.0` example.
+`config.hudi.yaml` keeps the older Apache Hudi `master` to `0.15` example.
 
 ## 2. Core idea
 
 The harness is split into two layers:
 
 1. **Python harness**: deterministic orchestration, storage, queueing, rate-limited GitHub scanning, Codex invocation, result validation, and report generation.
-2. **Codex worker**: semantic code reasoning, PR classification, upstream `0.15` applicability analysis, test transplantation, test execution, and optional fix verification.
+2. **Codex worker**: semantic code reasoning, PR classification, configured target-ref applicability analysis, test transplantation, test execution, and optional fix verification.
 
 The Python harness is the source of truth. Codex is a smart worker, but its decisions must be validated and stored by the harness.
 
@@ -33,10 +31,10 @@ Codex and the harness may access:
 
 - Public upstream GitHub PR metadata.
 - Public upstream PR diffs.
-- Public upstream source branches configured for scanning, such as `master` or
-  `main`.
-- Public upstream target refs configured for analysis, such as `0.15` or a
-  release tag.
+- Public upstream source branches configured for scanning, such as `main` or
+  `master`.
+- Public upstream target refs configured for analysis, such as a release tag or
+  release branch.
 - Local public OSS worktrees.
 - Public test logs generated during analysis.
 
@@ -66,7 +64,7 @@ Semantics:
 
 - `--from-date` means `merged_at >= from-date`.
 - `--to-date` means `merged_at <= to-date`.
-- If branch is omitted, scan both `master` and `0.15`.
+- If branch is omitted, scan every branch listed in `github.branches`.
 - No `--since-days` option is needed.
 
 ### 4.2 Slow GitHub scanning
@@ -100,8 +98,7 @@ The harness must support listing PRs already saved in SQLite before running anal
 
 ```bash
 backport-harness list-prs
-backport-harness list-prs --branch master
-backport-harness list-prs --branch 0.15
+backport-harness list-prs --branch main
 backport-harness list-prs --status QUEUED_FOR_ANALYSIS
 backport-harness list-prs --from-date 2024-01-01 --to-date 2024-12-31
 backport-harness list-prs --limit 50
@@ -188,7 +185,6 @@ Required commands:
 backport-harness scan --from-date 2024-01-01 --to-date 2024-12-31
 backport-harness list-prs
 backport-harness inspect --pr 12345
-backport-harness analyze --limit 5
 backport-harness analyze --pr 12345
 backport-harness analyze --limit 5 --dry-run
 backport-harness retry --status FAILED_INFRA --limit 3
@@ -319,7 +315,7 @@ CREATE TABLE IF NOT EXISTS prs (
     title TEXT NOT NULL,
     body TEXT,
     source_branch TEXT,
-    target_branch TEXT NOT NULL,
+    upstream_branch TEXT NOT NULL,
     merged_commit_sha TEXT,
     created_at TEXT,
     updated_at TEXT,
@@ -328,7 +324,7 @@ CREATE TABLE IF NOT EXISTS prs (
     author TEXT,
     created_in_db_at TEXT NOT NULL,
     updated_in_db_at TEXT NOT NULL,
-    UNIQUE(github_pr_number, target_branch)
+    UNIQUE(github_pr_number, upstream_branch)
 );
 ```
 
@@ -416,7 +412,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     decision TEXT NOT NULL,
     confidence TEXT NOT NULL,
     bugfix_classification TEXT,
-    applies_to_oss_015 INTEGER,
+    applies_to_target_ref INTEGER,
     reason TEXT NOT NULL,
     human_action TEXT,
     created_at TEXT NOT NULL,
@@ -496,11 +492,11 @@ PAUSED
 ### 8.2 Decision statuses
 
 ```text
-DIRECT_015_BUGFIX
-MASTER_NOT_APPLICABLE
-MASTER_POSSIBLY_APPLICABLE
-MASTER_REPRODUCED_ON_015
-MASTER_FIX_VERIFIED_ON_015
+TARGET_BRANCH_BUGFIX
+SOURCE_NOT_APPLICABLE
+SOURCE_POSSIBLY_APPLICABLE
+SOURCE_REPRODUCED_ON_TARGET
+SOURCE_FIX_VERIFIED_ON_TARGET
 INCONCLUSIVE
 NEEDS_HUMAN_REVIEW
 DISCARDED_NON_BUGFIX
@@ -536,28 +532,28 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    PR[PR saved in DB] --> Branch{Target branch?}
+    PR[PR saved in DB] --> Branch{Upstream branch?}
 
-    Branch -->|0.15| Analyze015[Codex classifies OSS 0.15 PR]
-    Analyze015 --> D015{Bugfix?}
-    D015 -->|yes| Direct[DIRECT_015_BUGFIX]
-    D015 -->|docs/ci/release/non-bugfix| Discard015[DISCARDED_*]
-    D015 -->|uncertain| Human015[NEEDS_HUMAN_REVIEW or INCONCLUSIVE]
+    Branch -->|configured target branch label| AnalyzeTarget[Codex classifies target-branch PR]
+    AnalyzeTarget --> DTarget{Bugfix?}
+    DTarget -->|yes| Direct[TARGET_BRANCH_BUGFIX]
+    DTarget -->|docs/ci/release/non-bugfix| DiscardTarget[DISCARDED_*]
+    DTarget -->|uncertain| HumanTarget[NEEDS_HUMAN_REVIEW or INCONCLUSIVE]
 
-    Branch -->|master| AnalyzeMaster[Codex analyzes master PR]
-    AnalyzeMaster --> Bugfix{Real bugfix?}
-    Bugfix -->|no| DiscardMaster[DISCARDED_NON_BUGFIX]
-    Bugfix -->|yes| Exists{Relevant code in OSS 0.15?}
+    Branch -->|other configured source branch| AnalyzeSource[Codex analyzes source-branch PR]
+    AnalyzeSource --> Bugfix{Real bugfix?}
+    Bugfix -->|no| DiscardSource[DISCARDED_NON_BUGFIX]
+    Bugfix -->|yes| Exists{Relevant code in configured target ref?}
 
-    Exists -->|clearly absent or fix already present| NotApplicable[MASTER_NOT_APPLICABLE]
+    Exists -->|clearly absent or fix already present| NotApplicable[SOURCE_NOT_APPLICABLE]
     Exists -->|exists or uncertain| Test{Can transplant regression test?}
 
-    Test -->|no| Possible[MASTER_POSSIBLY_APPLICABLE or INCONCLUSIVE]
-    Test -->|yes, test passes| Possible2[MASTER_POSSIBLY_APPLICABLE or INCONCLUSIVE]
-    Test -->|yes, fails with expected bug| Reproduced[MASTER_REPRODUCED_ON_015]
+    Test -->|no| Possible[SOURCE_POSSIBLY_APPLICABLE or INCONCLUSIVE]
+    Test -->|yes, test passes| Possible2[SOURCE_POSSIBLY_APPLICABLE or INCONCLUSIVE]
+    Test -->|yes, fails with expected bug| Reproduced[SOURCE_REPRODUCED_ON_TARGET]
 
     Reproduced --> Fix{Can adapt/apply fix?}
-    Fix -->|yes, test passes after fix| Verified[MASTER_FIX_VERIFIED_ON_015]
+    Fix -->|yes, test passes after fix| Verified[SOURCE_FIX_VERIFIED_ON_TARGET]
     Fix -->|no| Reproduced
 ```
 
@@ -575,22 +571,22 @@ Example:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "pr_number": 12345,
-  "target_branch": "master",
-  "decision": "MASTER_FIX_VERIFIED_ON_015",
+  "upstream_branch": "main",
+  "decision": "SOURCE_FIX_VERIFIED_ON_TARGET",
   "confidence": "very_high",
   "bugfix_classification": "correctness_bugfix",
   "summary": "Fixes a null handling bug in compaction scheduling.",
   "applicability": {
-    "applies_to_oss_015": true,
-    "reason": "The affected class and method exist in OSS 0.15 and contain equivalent logic."
+    "applies_to_target_ref": true,
+    "reason": "The affected class and method exist in the configured public target ref and contain equivalent logic."
   },
   "touched_components": [
     "hudi-client",
     "compaction"
   ],
-  "production_files_relevant_to_015": [
+  "production_files_relevant_to_target": [
     "hudi-client/src/main/java/example/Foo.java"
   ],
   "test_files_used": [
@@ -599,7 +595,7 @@ Example:
   "test_transplant": {
     "attempted": true,
     "result": "applied_and_compiled",
-    "notes": "Adapted imports and constructor arguments to 0.15 APIs."
+    "notes": "Adapted imports and constructor arguments to target-ref APIs."
   },
   "test_before_fix": {
     "attempted": true,
@@ -619,11 +615,11 @@ Example:
   "evidence": [
     {
       "type": "code_presence",
-      "description": "Class Foo exists in OSS 0.15."
+      "description": "Class Foo exists in the configured public target ref."
     },
     {
       "type": "logic_match",
-      "description": "The same null-unsafe branch exists in OSS 0.15."
+      "description": "The same null-unsafe branch exists in the configured public target ref."
     },
     {
       "type": "test_failure",
@@ -650,7 +646,7 @@ All results require:
 
 - `schema_version`.
 - `pr_number`.
-- `target_branch`.
+- `upstream_branch`.
 - `decision`.
 - `confidence`.
 - `summary`.
@@ -658,7 +654,7 @@ All results require:
 - Known decision enum.
 - Known confidence enum.
 
-### 10.2 `MASTER_FIX_VERIFIED_ON_015`
+### 10.2 `SOURCE_FIX_VERIFIED_ON_TARGET`
 
 Require:
 
@@ -670,7 +666,7 @@ Require:
 - At least one `test_failure` evidence item.
 - At least one `test_pass` evidence item.
 
-### 10.3 `MASTER_REPRODUCED_ON_015`
+### 10.3 `SOURCE_REPRODUCED_ON_TARGET`
 
 Require:
 
@@ -679,16 +675,16 @@ Require:
 - Expected failure explanation.
 - Test log path exists.
 
-### 10.4 `MASTER_NOT_APPLICABLE`
+### 10.4 `SOURCE_NOT_APPLICABLE`
 
 Require at least one strong reason:
 
-- Affected file absent in `0.15`.
-- Affected class absent in `0.15`.
-- Affected module absent in `0.15`.
-- Feature absent in `0.15`.
-- Bug introduced after `0.15`.
-- Fix behavior already present in public OSS `0.15`.
+- Affected file absent in the configured target ref.
+- Affected class absent in the configured target ref.
+- Affected module absent in the configured target ref.
+- Feature absent in the configured target ref.
+- Bug introduced after the configured target ref.
+- Fix behavior already present in the configured target ref.
 
 ### 10.5 `INCONCLUSIVE`
 
@@ -729,11 +725,10 @@ Recommended config:
 
 ```yaml
 github:
-  owner: apache
-  repo: hudi
+  owner: lance-format
+  repo: lance
   branches:
-    - master
-    - "0.15"
+    - main
   token_env: GITHUB_TOKEN
   request_delay_seconds: 1.0
   page_delay_seconds: 2.0
@@ -755,7 +750,7 @@ for each PR:
     lock queue item
     create analysis_run
     create task bundle
-    create clean 0.15 worktree
+    create clean configured target-ref worktree
     invoke Codex with 2-hour timeout
     parse output
     validate result
@@ -797,9 +792,9 @@ analysis:
 
 Include:
 
-- `DIRECT_015_BUGFIX`
-- `MASTER_REPRODUCED_ON_015`
-- `MASTER_FIX_VERIFIED_ON_015`
+- `TARGET_BRANCH_BUGFIX`
+- `SOURCE_REPRODUCED_ON_TARGET`
+- `SOURCE_FIX_VERIFIED_ON_TARGET`
 - `NEEDS_HUMAN_REVIEW`
 
 ### 14.2 Inconclusive
@@ -814,7 +809,7 @@ Include:
 
 Include:
 
-- `MASTER_NOT_APPLICABLE`
+- `SOURCE_NOT_APPLICABLE`
 - `DISCARDED_NON_BUGFIX`
 - `DISCARDED_DOCS_ONLY`
 - `DISCARDED_CI_ONLY`
@@ -869,8 +864,8 @@ backport-harness/
       review.py
 
   prompts/
-    analyze_015_pr.md
-    analyze_master_pr.md
+    analyze_target_branch_pr.md
+    analyze_source_branch_pr.md
     transplant_test.md
     verify_fix.md
 
@@ -909,7 +904,7 @@ The first useful version should include:
 - Worktree and task bundle generation.
 - Codex invocation with 2-hour timeout.
 - Strict result parsing and validation.
-- `analyze --limit`.
+- `analyze --pr`.
 - `analyze --dry-run`.
 - `recover-stale`.
 - `retry`.
@@ -918,8 +913,8 @@ The first useful version should include:
 The first Codex prompt may do only:
 
 - PR classification.
-- `0.15` direct bugfix detection.
-- Master PR rough applicability to public OSS `0.15`.
+- Configured target-branch bugfix detection.
+- Source-branch PR rough applicability to the configured public target ref.
 
 Test transplantation can be added after the queue is reliable.
 

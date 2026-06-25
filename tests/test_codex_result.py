@@ -21,16 +21,16 @@ from backport_harness.codex_result import (
 
 def valid_result(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "pr_number": 12345,
-        "target_branch": "master",
-        "decision": "MASTER_FIX_VERIFIED_ON_015",
+        "upstream_branch": "master",
+        "decision": "SOURCE_FIX_VERIFIED_ON_TARGET",
         "confidence": "very_high",
         "bugfix_classification": "correctness_bugfix",
         "summary": "Fixes null handling in compaction scheduling.",
         "human_action": "Review adapted patch and backport if appropriate.",
         "applicability": {
-            "applies_to_oss_015": True,
+            "applies_to_target_ref": True,
             "reason": "The affected class and method exist in OSS 0.15.",
             "affected_public_paths": [
                 "hudi-client/src/main/java/example/Foo.java",
@@ -38,7 +38,7 @@ def valid_result(**overrides: Any) -> dict[str, Any]:
             "missing_public_paths": [],
         },
         "touched_components": ["hudi-client", "compaction"],
-        "production_files_relevant_to_015": [
+        "production_files_relevant_to_target": [
             "hudi-client/src/main/java/example/Foo.java",
         ],
         "test_files_used": [
@@ -97,15 +97,15 @@ def parse_result(payload: dict[str, Any]):
 def test_parse_valid_master_result() -> None:
     result = parse_result(valid_result())
 
-    assert result.decision is Decision.MASTER_FIX_VERIFIED_ON_015
+    assert result.decision is Decision.SOURCE_FIX_VERIFIED_ON_TARGET
     assert result.confidence is Confidence.VERY_HIGH
     assert result.evidence[0].type is EvidenceType.CODE_PRESENCE
 
 
 def test_parse_valid_015_result() -> None:
     payload = valid_result(
-        target_branch="0.15",
-        decision="DIRECT_015_BUGFIX",
+        upstream_branch="0.15",
+        decision="TARGET_BRANCH_BUGFIX",
         confidence="medium",
         fix_verification={
             "attempted": False,
@@ -119,15 +119,15 @@ def test_parse_valid_015_result() -> None:
 
     result = parse_result(payload)
 
-    assert result.target_branch == "0.15"
-    assert result.decision is Decision.DIRECT_015_BUGFIX
+    assert result.upstream_branch == "0.15"
+    assert result.decision is Decision.TARGET_BRANCH_BUGFIX
     assert result.fix_verification.result is None
 
 
 def test_parse_valid_configured_upstream_branch_result() -> None:
-    result = parse_result(valid_result(target_branch="main"))
+    result = parse_result(valid_result(upstream_branch="main"))
 
-    assert result.target_branch == "main"
+    assert result.upstream_branch == "main"
 
 
 def test_load_codex_result_from_path(tmp_path: Path) -> None:
@@ -157,7 +157,7 @@ def test_missing_required_field_fails_validation() -> None:
     [
         ("decision", "UNKNOWN_DECISION"),
         ("confidence", "certain"),
-        ("schema_version", 2),
+        ("schema_version", 1),
     ],
 )
 def test_unknown_or_unsupported_top_level_values_fail_validation(
@@ -184,7 +184,7 @@ def test_unknown_evidence_type_fails_validation() -> None:
         (
             "applicability",
             {
-                "applies_to_oss_015": True,
+                "applies_to_target_ref": True,
                 "reason": "",
                 "affected_public_paths": [],
                 "missing_public_paths": [],

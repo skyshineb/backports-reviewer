@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -72,7 +73,57 @@ def test_init_database_can_be_rerun_safely(tmp_path: Path) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
 
-    assert rows == [("001_initial.sql",), ("002_evidence_patch_path.sql",)]
+    assert rows == [
+        ("001_initial.sql",),
+        ("002_evidence_patch_path.sql",),
+        ("003_generic_contract.sql",),
+    ]
+
+
+def test_init_database_migrates_generic_contract_from_existing_database(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "backport_harness.sqlite3"
+    _create_database_at_migration_002(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_id = _insert_legacy_pr(connection)
+        analysis_run_id = _insert_legacy_analysis_run(connection, pr_id=pr_id)
+        _insert_legacy_decisions(
+            connection,
+            pr_id=pr_id,
+            analysis_run_id=analysis_run_id,
+        )
+
+    init_database(sqlite_path)
+
+    with connect(sqlite_path) as connection:
+        pr_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(prs)").fetchall()
+        }
+        decision_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(decisions)").fetchall()
+        }
+        upstream_branch = connection.execute(
+            "SELECT upstream_branch FROM prs WHERE github_pr_number = 12345"
+        ).fetchone()[0]
+        decisions = connection.execute(
+            "SELECT decision, applies_to_target_ref FROM decisions ORDER BY id"
+        ).fetchall()
+
+    assert "upstream_branch" in pr_columns
+    assert "target_branch" not in pr_columns
+    assert "applies_to_target_ref" in decision_columns
+    assert "applies_to_oss_015" not in decision_columns
+    assert upstream_branch == "master"
+    assert decisions == [
+        ("TARGET_BRANCH_BUGFIX", 1),
+        ("SOURCE_NOT_APPLICABLE", 0),
+        ("SOURCE_POSSIBLY_APPLICABLE", 1),
+        ("SOURCE_REPRODUCED_ON_TARGET", 1),
+        ("SOURCE_FIX_VERIFIED_ON_TARGET", 1),
+    ]
 
 
 def test_connect_enables_foreign_keys(tmp_path: Path) -> None:
@@ -214,13 +265,13 @@ def test_list_saved_pull_requests_returns_latest_decision(tmp_path: Path) -> Non
             connection,
             pr_id=pr_id,
             analysis_run_id=second_run_id,
-            decision="MASTER_NOT_APPLICABLE",
+            decision="SOURCE_NOT_APPLICABLE",
             created_at="2024-01-02T02:00:00Z",
         )
 
         rows = list_saved_pull_requests(connection)
 
-    assert rows[0].latest_decision == "MASTER_NOT_APPLICABLE"
+    assert rows[0].latest_decision == "SOURCE_NOT_APPLICABLE"
 
 
 def test_get_pull_request_inspection_returns_none_for_missing_pr(
@@ -314,7 +365,7 @@ def test_get_pull_request_inspection_returns_post_analysis_details(
             connection,
             pr_id=pr_id,
             analysis_run_id=second_run_id,
-            decision="MASTER_NOT_APPLICABLE",
+            decision="SOURCE_NOT_APPLICABLE",
             created_at="2024-01-02T02:00:00Z",
         )
         _insert_evidence(connection, decision_id=latest_decision_id)
@@ -325,7 +376,7 @@ def test_get_pull_request_inspection_returns_post_analysis_details(
 
     assert inspection is not None
     assert inspection.latest_decision is not None
-    assert inspection.latest_decision.decision == "MASTER_NOT_APPLICABLE"
+    assert inspection.latest_decision.decision == "SOURCE_NOT_APPLICABLE"
     assert inspection.latest_analysis_run is not None
     assert inspection.latest_analysis_run.run_id == "run-2"
     assert inspection.latest_decision.analysis_run.run_id == "run-2"
@@ -491,13 +542,14 @@ def test_create_analysis_queue_row_assigns_computed_priority(
         create_analysis_queue_row_if_missing(
             connection,
             direct_pr_id,
-            target_branch="0.15",
+            upstream_branch="0.15",
             title="Add release fix",
+            target_ref_label="0.15",
         )
         create_analysis_queue_row_if_missing(
             connection,
             bugfix_pr_id,
-            target_branch="master",
+            upstream_branch="master",
             title="Fix NPE in compaction",
         )
 
@@ -532,7 +584,7 @@ def test_create_analysis_queue_row_does_not_overwrite_existing_queue_state(
         create_analysis_queue_row_if_missing(
             connection,
             pr_id,
-            target_branch="0.15",
+            upstream_branch="0.15",
             title="Fix important bug",
         )
 
@@ -976,7 +1028,7 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
 
         decision_row = connection.execute(
             """
-            SELECT decision, confidence, bugfix_classification, applies_to_oss_015,
+            SELECT decision, confidence, bugfix_classification, applies_to_target_ref,
                    reason, human_action
             FROM decisions
             WHERE id = ?
@@ -1008,7 +1060,7 @@ def test_store_validated_decision_persists_decision_evidence_and_test_runs(
         ).fetchone()
 
     assert decision_row == (
-        "MASTER_FIX_VERIFIED_ON_015",
+        "SOURCE_FIX_VERIFIED_ON_TARGET",
         "very_high",
         "correctness_bugfix",
         1,
@@ -1071,16 +1123,16 @@ def test_store_validated_decision_persists_before_fix_test_for_possible_result(
     result = parse_codex_result_json(
         """
         {
-          "schema_version": 1,
+          "schema_version": 2,
           "pr_number": 12345,
-          "target_branch": "master",
-          "decision": "MASTER_POSSIBLY_APPLICABLE",
+          "upstream_branch": "master",
+          "decision": "SOURCE_POSSIBLY_APPLICABLE",
           "confidence": "medium",
           "bugfix_classification": "correctness_bugfix",
           "summary": "Relevant public OSS 0.15 code exists, but the test passes before the fix.",
           "human_action": "Review the public evidence before deciding whether to backport.",
           "applicability": {
-            "applies_to_oss_015": true,
+            "applies_to_target_ref": true,
             "reason": "The affected class and method exist in OSS 0.15.",
             "affected_public_paths": [],
             "missing_public_paths": []
@@ -1190,7 +1242,7 @@ def test_store_validated_decision_preserves_previous_decisions(
             connection,
             pr_id=pr_id,
             analysis_run_id=second_run_id,
-            result=_valid_codex_result(decision="MASTER_NOT_APPLICABLE"),
+            result=_valid_codex_result(decision="SOURCE_NOT_APPLICABLE"),
         )
 
         decision_rows = connection.execute(
@@ -1207,24 +1259,24 @@ def test_store_validated_decision_preserves_previous_decisions(
 
     assert decision_rows == [
         (first_run_id, "INCONCLUSIVE"),
-        (second_run_id, "MASTER_NOT_APPLICABLE"),
+        (second_run_id, "SOURCE_NOT_APPLICABLE"),
     ]
-    assert listed[0].latest_decision == "MASTER_NOT_APPLICABLE"
+    assert listed[0].latest_decision == "SOURCE_NOT_APPLICABLE"
     assert inspected is not None
     assert inspected.latest_decision is not None
-    assert inspected.latest_decision.decision == "MASTER_NOT_APPLICABLE"
+    assert inspected.latest_decision.decision == "SOURCE_NOT_APPLICABLE"
 
 
 @pytest.mark.parametrize(
     ("decision", "queue_status"),
     [
-        (Decision.DIRECT_015_BUGFIX, "REPORTABLE"),
-        (Decision.MASTER_POSSIBLY_APPLICABLE, "REPORTABLE"),
-        (Decision.MASTER_REPRODUCED_ON_015, "REPORTABLE"),
-        (Decision.MASTER_FIX_VERIFIED_ON_015, "REPORTABLE"),
+        (Decision.TARGET_BRANCH_BUGFIX, "REPORTABLE"),
+        (Decision.SOURCE_POSSIBLY_APPLICABLE, "REPORTABLE"),
+        (Decision.SOURCE_REPRODUCED_ON_TARGET, "REPORTABLE"),
+        (Decision.SOURCE_FIX_VERIFIED_ON_TARGET, "REPORTABLE"),
         (Decision.INCONCLUSIVE, "REPORTABLE"),
         (Decision.NEEDS_HUMAN_REVIEW, "REPORTABLE"),
-        (Decision.MASTER_NOT_APPLICABLE, "DONE"),
+        (Decision.SOURCE_NOT_APPLICABLE, "DONE"),
         (Decision.DISCARDED_NON_BUGFIX, "DONE"),
         (Decision.DISCARDED_DOCS_ONLY, "DONE"),
         (Decision.DISCARDED_CI_ONLY, "DONE"),
@@ -1704,20 +1756,20 @@ def test_retry_pull_request_by_pr_skips_running_rows(tmp_path: Path) -> None:
     assert row == ("CODEX_RUNNING",)
 
 
-def _valid_codex_result(*, decision: str = "MASTER_FIX_VERIFIED_ON_015"):
+def _valid_codex_result(*, decision: str = "SOURCE_FIX_VERIFIED_ON_TARGET"):
     return parse_codex_result_json(
         """
         {
-          "schema_version": 1,
+          "schema_version": 2,
           "pr_number": 12345,
-          "target_branch": "master",
+          "upstream_branch": "master",
           "decision": "%s",
           "confidence": "very_high",
           "bugfix_classification": "correctness_bugfix",
           "summary": "Fixes null handling in compaction scheduling.",
           "human_action": "Review adapted patch and backport if appropriate.",
           "applicability": {
-            "applies_to_oss_015": true,
+            "applies_to_target_ref": true,
             "reason": "The affected class and method exist in OSS 0.15.",
             "affected_public_paths": [],
             "missing_public_paths": []
@@ -1770,6 +1822,123 @@ def _valid_codex_result(*, decision: str = "MASTER_FIX_VERIFIED_ON_015"):
     )
 
 
+def _create_database_at_migration_002(sqlite_path: Path) -> None:
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    with connect(sqlite_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        for migration_name in ("001_initial.sql", "002_evidence_patch_path.sql"):
+            connection.executescript(_migration_sql(migration_name))
+            connection.execute(
+                """
+                INSERT INTO schema_migrations(version, applied_at)
+                VALUES (?, ?)
+                """,
+                (migration_name, "2024-01-01T00:00:00Z"),
+            )
+
+
+def _migration_sql(migration_name: str) -> str:
+    return (
+        resources.files("backport_harness.migrations")
+        .joinpath(migration_name)
+        .read_text(encoding="utf-8")
+    )
+
+
+def _insert_legacy_pr(connection) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO prs(
+            github_pr_number,
+            github_pr_url,
+            title,
+            target_branch,
+            merged_at,
+            created_in_db_at,
+            updated_in_db_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            12345,
+            "https://github.com/apache/hudi/pull/12345",
+            "Fix legacy behavior",
+            "master",
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def _insert_legacy_analysis_run(connection, *, pr_id: int) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO analysis_runs(
+            pr_id,
+            run_id,
+            started_at,
+            finished_at,
+            codex_exit_code,
+            status,
+            task_dir
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            "legacy-run",
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:10:00Z",
+            0,
+            "DONE",
+            "workspace/tasks/pr-12345",
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def _insert_legacy_decisions(connection, *, pr_id: int, analysis_run_id: int) -> None:
+    for decision, applies_to_target in (
+        ("DIRECT_015_BUGFIX", 1),
+        ("MASTER_NOT_APPLICABLE", 0),
+        ("MASTER_POSSIBLY_APPLICABLE", 1),
+        ("MASTER_REPRODUCED_ON_015", 1),
+        ("MASTER_FIX_VERIFIED_ON_015", 1),
+    ):
+        connection.execute(
+            """
+            INSERT INTO decisions(
+                pr_id,
+                analysis_run_id,
+                decision,
+                confidence,
+                applies_to_oss_015,
+                reason,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                pr_id,
+                analysis_run_id,
+                decision,
+                "high",
+                applies_to_target,
+                "legacy reason",
+                "2024-01-01T00:00:00Z",
+            ),
+        )
+
+
 def _insert_saved_pr(
     connection,
     *,
@@ -1786,7 +1955,7 @@ def _insert_saved_pr(
             github_pr_number,
             github_pr_url,
             title,
-            target_branch,
+            upstream_branch,
             merged_at,
             created_in_db_at,
             updated_in_db_at
@@ -1842,7 +2011,7 @@ def _insert_pr_without_queue(
             github_pr_number,
             github_pr_url,
             title,
-            target_branch,
+            upstream_branch,
             merged_at,
             created_in_db_at,
             updated_in_db_at

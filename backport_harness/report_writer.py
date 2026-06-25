@@ -10,10 +10,10 @@ from backport_harness.storage import get_report_data
 
 
 BACKPORT_CANDIDATE_DECISIONS = {
-    "DIRECT_015_BUGFIX",
-    "MASTER_POSSIBLY_APPLICABLE",
-    "MASTER_REPRODUCED_ON_015",
-    "MASTER_FIX_VERIFIED_ON_015",
+    "TARGET_BRANCH_BUGFIX",
+    "SOURCE_POSSIBLY_APPLICABLE",
+    "SOURCE_REPRODUCED_ON_TARGET",
+    "SOURCE_FIX_VERIFIED_ON_TARGET",
     "NEEDS_HUMAN_REVIEW",
 }
 INCONCLUSIVE_DECISIONS = {
@@ -22,7 +22,7 @@ INCONCLUSIVE_DECISIONS = {
     "NEEDS_RETRY",
 }
 DISCARDED_DECISIONS = {
-    "MASTER_NOT_APPLICABLE",
+    "SOURCE_NOT_APPLICABLE",
     "DISCARDED_NON_BUGFIX",
     "DISCARDED_DOCS_ONLY",
     "DISCARDED_CI_ONLY",
@@ -110,7 +110,7 @@ def generate_reports(*, sqlite_path: Path, output_dir: Path) -> ReportGeneration
 def _render_candidate_markdown(pull_requests: list[ReportPullRequest]) -> str:
     columns = [
         "PR",
-        "Target branch",
+        "Upstream branch",
         "Merged date",
         "Decision",
         "Confidence",
@@ -126,7 +126,7 @@ def _render_candidate_markdown(pull_requests: list[ReportPullRequest]) -> str:
         rows=[
             [
                 _markdown_pr_link(pull_request),
-                pull_request.target_branch,
+                pull_request.upstream_branch,
                 pull_request.merged_at,
                 _latest_decision_value(pull_request) or "-",
                 _latest_decision_field(pull_request, "confidence"),
@@ -143,7 +143,7 @@ def _render_candidate_markdown(pull_requests: list[ReportPullRequest]) -> str:
 def _render_inconclusive_markdown(pull_requests: list[ReportPullRequest]) -> str:
     columns = [
         "PR",
-        "Target branch",
+        "Upstream branch",
         "Merged date",
         "Decision",
         "Confidence",
@@ -159,7 +159,7 @@ def _render_inconclusive_markdown(pull_requests: list[ReportPullRequest]) -> str
         rows=[
             [
                 _markdown_pr_link(pull_request),
-                pull_request.target_branch,
+                pull_request.upstream_branch,
                 pull_request.merged_at,
                 _latest_decision_value(pull_request) or pull_request.queue_status or "-",
                 _latest_decision_field(pull_request, "confidence"),
@@ -226,7 +226,7 @@ def _pr_json_object(pull_request: ReportPullRequest) -> dict[str, Any]:
         "number": pull_request.github_pr_number,
         "url": pull_request.github_pr_url,
         "title": pull_request.title,
-        "target_branch": pull_request.target_branch,
+        "upstream_branch": pull_request.upstream_branch,
         "merged_at": pull_request.merged_at,
     }
 
@@ -250,7 +250,7 @@ def _decision_json_object(decision: ReportDecision | None) -> dict[str, Any] | N
         "decision": decision.decision,
         "confidence": decision.confidence,
         "bugfix_classification": decision.bugfix_classification,
-        "applies_to_oss_015": decision.applies_to_oss_015,
+        "applies_to_target_ref": decision.applies_to_target_ref,
         "reason": decision.reason,
         "human_action": decision.human_action,
         "created_at": decision.created_at,

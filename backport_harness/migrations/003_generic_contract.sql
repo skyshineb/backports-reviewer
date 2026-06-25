@@ -1,0 +1,18 @@
+ALTER TABLE prs RENAME COLUMN target_branch TO upstream_branch;
+
+ALTER TABLE decisions RENAME COLUMN applies_to_oss_015 TO applies_to_target_ref;
+
+UPDATE decisions
+SET decision = CASE decision
+    WHEN 'DIRECT_015_BUGFIX' THEN 'TARGET_BRANCH_BUGFIX'
+    WHEN 'MASTER_NOT_APPLICABLE' THEN 'SOURCE_NOT_APPLICABLE'
+    WHEN 'MASTER_POSSIBLY_APPLICABLE' THEN 'SOURCE_POSSIBLY_APPLICABLE'
+    WHEN 'MASTER_REPRODUCED_ON_015' THEN 'SOURCE_REPRODUCED_ON_TARGET'
+    WHEN 'MASTER_FIX_VERIFIED_ON_015' THEN 'SOURCE_FIX_VERIFIED_ON_TARGET'
+    ELSE decision
+END;
+
+DROP INDEX IF EXISTS idx_prs_target_branch_merged_at;
+
+CREATE INDEX IF NOT EXISTS idx_prs_upstream_branch_merged_at
+    ON prs(upstream_branch, merged_at);

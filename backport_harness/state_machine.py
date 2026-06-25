@@ -50,9 +50,9 @@ AMBIGUOUS_FIX_TITLE_KEYWORDS = (
     "prevent",
 )
 
-PRIORITY_DIRECT_015 = 10
-PRIORITY_LIKELY_MASTER_BUGFIX = 20
-PRIORITY_AMBIGUOUS_MASTER_FIX = 50
+PRIORITY_CONFIGURED_TARGET_BRANCH = 10
+PRIORITY_LIKELY_SOURCE_BUGFIX = 20
+PRIORITY_AMBIGUOUS_SOURCE_FIX = 50
 PRIORITY_DEFAULT = 100
 
 ALLOWED_QUEUE_TRANSITIONS = {
@@ -91,16 +91,21 @@ ALLOWED_QUEUE_TRANSITIONS = {
 }
 
 
-def assign_initial_priority(target_branch: str, title: str) -> int:
-    if target_branch == "0.15":
-        return PRIORITY_DIRECT_015
+def assign_initial_priority(
+    upstream_branch: str,
+    title: str,
+    *,
+    target_ref_label: str | None = None,
+) -> int:
+    if target_ref_label is not None and upstream_branch == target_ref_label:
+        return PRIORITY_CONFIGURED_TARGET_BRANCH
 
     normalized_title = title.lower()
     if _contains_any(normalized_title, BUGFIX_TITLE_KEYWORDS):
-        return PRIORITY_LIKELY_MASTER_BUGFIX
+        return PRIORITY_LIKELY_SOURCE_BUGFIX
 
     if _contains_any(normalized_title, AMBIGUOUS_FIX_TITLE_KEYWORDS):
-        return PRIORITY_AMBIGUOUS_MASTER_FIX
+        return PRIORITY_AMBIGUOUS_SOURCE_FIX
 
     return PRIORITY_DEFAULT
 

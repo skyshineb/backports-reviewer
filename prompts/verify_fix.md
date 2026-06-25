@@ -35,8 +35,8 @@ Do not write prose outside `output/codex_result.json` and `output/notes.md`.
 
 ## Allowed Decisions
 
-- `MASTER_FIX_VERIFIED_ON_015`
-- `MASTER_REPRODUCED_ON_015`
+- `SOURCE_FIX_VERIFIED_ON_TARGET`
+- `SOURCE_REPRODUCED_ON_TARGET`
 - `INCONCLUSIVE`
 - `NEEDS_HUMAN_REVIEW`
 - `FAILED_INFRA`
@@ -58,14 +58,14 @@ Logical uncertainty, missing proof, ambiguous applicability, unsupported adaptat
 Write strict JSON only to `output/codex_result.json`.
 Write human-readable notes only to `output/notes.md`.
 Do not write prose outside `output/codex_result.json` and `output/notes.md`.
-Use `schema_version: 1`.
+Use `schema_version: 2`.
 Use only the allowed decision values listed above.
 
 The JSON object must include these top-level fields:
 
 - `schema_version`
 - `pr_number`
-- `target_branch`
+- `upstream_branch`
 - `decision`
 - `confidence`
 - `summary`
@@ -86,12 +86,12 @@ The JSON object must include these top-level fields:
 
 `applicability` must be an object with:
 
-- `applies_to_oss_015`: boolean or null when unknown.
+- `applies_to_target_ref`: boolean or null when unknown.
 - `reason`: non-empty string.
 - `affected_public_paths`: array of repository-relative public paths.
 - `missing_public_paths`: array of repository-relative public paths.
 
-The `applies_to_oss_015` field retains its historical name; interpret it as applicability to the configured public target ref for this task.
+Interpret `applies_to_target_ref` as applicability to the configured public target ref for this task.
 
 `test_transplant` must be an object with:
 
@@ -138,8 +138,8 @@ Use null only for fields that are explicitly unavailable because a test, transpl
 
 Decision-specific requirements:
 
-- `MASTER_FIX_VERIFIED_ON_015`: require `confidence: very_high`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, a `fix_verification.log_path`, at least one `test_failure` evidence item with the before-fix log path, and at least one `test_pass` evidence item with the after-fix log path and adapted patch path.
-- `MASTER_REPRODUCED_ON_015`: require `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
+- `SOURCE_FIX_VERIFIED_ON_TARGET`: require `confidence: very_high`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, `fix_verification.attempted: true`, `fix_verification.exit_code: 0`, a `fix_verification.patch_path`, a `fix_verification.log_path`, at least one `test_failure` evidence item with the before-fix log path, and at least one `test_pass` evidence item with the after-fix log path and adapted patch path.
+- `SOURCE_REPRODUCED_ON_TARGET`: require `test_transplant.attempted: true`, `test_transplant.result: applied` or `applied_and_compiled`, `test_before_fix.attempted: true`, a non-zero `test_before_fix.exit_code`, a `test_before_fix.log_path`, and `test_failure` evidence with the expected failure.
 - `INCONCLUSIVE` and `NEEDS_HUMAN_REVIEW`: require `uncertainty` evidence and a clear `applicability.reason`.
 - `FAILED_INFRA`: require `infra_failure` evidence and a command, log path, or required input file that identifies one of the failures allowed by the `FAILED_INFRA` policy.
 

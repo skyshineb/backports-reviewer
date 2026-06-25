@@ -107,7 +107,7 @@ def analyze_one_pr(
         validation = validate_codex_result_file(
             task_dir=bundle.task_dir,
             result_path=bundle.task_dir / config.codex.result_file,
-            expected_target_branch=analysis_start.target_branch,
+            expected_upstream_branch=analysis_start.upstream_branch,
         )
         with connect(config.storage.sqlite_path) as connection:
             finish_result_validation(

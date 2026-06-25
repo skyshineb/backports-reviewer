@@ -13,6 +13,7 @@ from backport_harness.config import (
     ReportsConfig,
     SecurityConfig,
     StorageConfig,
+    TargetRefConfig,
 )
 from backport_harness.github_client import GitHubChangedFile, GitHubPullRequest
 from backport_harness.scanner import scan_pull_requests
@@ -72,7 +73,7 @@ def test_scan_one_branch_saves_pr_files_queue_and_scan_run(tmp_path: Path) -> No
 
     with connect(sqlite_path) as connection:
         prs = connection.execute(
-            "SELECT github_pr_number, target_branch, title FROM prs"
+            "SELECT github_pr_number, upstream_branch, title FROM prs"
         ).fetchall()
         files = connection.execute(
             """
@@ -222,6 +223,11 @@ def make_config(tmp_path: Path, sqlite_path: Path) -> HarnessConfig:
             upstream_url="https://github.com/apache/hudi.git",
             repo_dir=tmp_path / "upstream",
             worktree_dir=tmp_path / "worktrees",
+            target_ref=TargetRefConfig(
+                label="0.15",
+                ref="origin/release-0.15.0",
+                worktree_suffix="015",
+            ),
         ),
         codex=CodexConfig(
             command="codex",

@@ -9,11 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 
 class Decision(StrEnum):
-    DIRECT_015_BUGFIX = "DIRECT_015_BUGFIX"
-    MASTER_NOT_APPLICABLE = "MASTER_NOT_APPLICABLE"
-    MASTER_POSSIBLY_APPLICABLE = "MASTER_POSSIBLY_APPLICABLE"
-    MASTER_REPRODUCED_ON_015 = "MASTER_REPRODUCED_ON_015"
-    MASTER_FIX_VERIFIED_ON_015 = "MASTER_FIX_VERIFIED_ON_015"
+    TARGET_BRANCH_BUGFIX = "TARGET_BRANCH_BUGFIX"
+    SOURCE_NOT_APPLICABLE = "SOURCE_NOT_APPLICABLE"
+    SOURCE_POSSIBLY_APPLICABLE = "SOURCE_POSSIBLY_APPLICABLE"
+    SOURCE_REPRODUCED_ON_TARGET = "SOURCE_REPRODUCED_ON_TARGET"
+    SOURCE_FIX_VERIFIED_ON_TARGET = "SOURCE_FIX_VERIFIED_ON_TARGET"
     INCONCLUSIVE = "INCONCLUSIVE"
     NEEDS_HUMAN_REVIEW = "NEEDS_HUMAN_REVIEW"
     DISCARDED_NON_BUGFIX = "DISCARDED_NON_BUGFIX"
@@ -80,7 +80,7 @@ class CodexResultModel(BaseModel):
 
 
 class Applicability(CodexResultModel):
-    applies_to_oss_015: bool | None
+    applies_to_target_ref: bool | None
     reason: str = Field(min_length=1)
     affected_public_paths: list[str] = Field(default_factory=list)
     missing_public_paths: list[str] = Field(default_factory=list)
@@ -167,9 +167,9 @@ class Evidence(CodexResultModel):
 
 
 class CodexResult(CodexResultModel):
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     pr_number: int
-    target_branch: str = Field(min_length=1)
+    upstream_branch: str = Field(min_length=1)
     decision: Decision
     confidence: Confidence
     summary: str = Field(min_length=1)
@@ -181,11 +181,11 @@ class CodexResult(CodexResultModel):
     fix_verification: FixVerification
     bugfix_classification: str | None = None
     touched_components: list[str] = Field(default_factory=list)
-    production_files_relevant_to_015: list[str] = Field(default_factory=list)
+    production_files_relevant_to_target: list[str] = Field(default_factory=list)
     test_files_used: list[str] = Field(default_factory=list)
 
     @field_validator(
-        "production_files_relevant_to_015",
+        "production_files_relevant_to_target",
         "test_files_used",
         mode="after",
     )

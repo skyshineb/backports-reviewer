@@ -4,9 +4,8 @@
 
 Build a Python-based Backport Harness that:
 
-- Scans public upstream PRs merged into `master` and `0.15`.
-- Supports configured public upstream branches and public target refs for
-  non-default public-only runs.
+- Scans public upstream PRs merged into configured public source branches.
+- Supports configured public upstream repositories, branches, and target refs.
 - Supports historical catch-up via `--from-date` and `--to-date`.
 - Stores all data in SQLite.
 - Lets users list and inspect saved PRs before analysis.
@@ -136,11 +135,10 @@ Implement typed config:
 
 ```yaml
 github:
-  owner: apache
-  repo: hudi
+  owner: lance-format
+  repo: lance
   branches:
-    - master
-    - "0.15"
+    - main
   token_env: GITHUB_TOKEN
   request_delay_seconds: 1.0
   page_delay_seconds: 2.0
@@ -149,13 +147,13 @@ github:
   respect_rate_limit: true
 
 local_repo:
-  upstream_url: https://github.com/apache/hudi.git
-  repo_dir: "./workspace/upstream"
-  worktree_dir: "./workspace/worktrees"
+  upstream_url: https://github.com/lance-format/lance.git
+  repo_dir: "./workspace/lance-v7/upstream"
+  worktree_dir: "./workspace/lance-v7/worktrees"
   target_ref:
-    label: "0.15"
-    ref: "origin/release-0.15.0"
-    worktree_suffix: "015"
+    label: "v7.0.0"
+    ref: "refs/tags/v7.0.0"
+    worktree_suffix: "v7.0.0"
 
 codex:
   command: "codex"
@@ -170,10 +168,10 @@ analysis:
   stale_timeout_seconds: 7200
 
 reports:
-  output_dir: "./reports"
+  output_dir: "./reports/lance-v7"
 
 storage:
-  sqlite_path: "./workspace/backport_harness.sqlite3"
+  sqlite_path: "./workspace/lance-v7/backport_harness.sqlite3"
 ```
 
 ### Acceptance criteria
@@ -198,8 +196,7 @@ backport-harness scan --from-date 2024-01-01 --to-date 2024-12-31
 Optional branch filter:
 
 ```bash
-backport-harness scan --from-date 2024-01-01 --to-date 2024-12-31 --branch master
-backport-harness scan --from-date 2024-01-01 --to-date 2024-12-31 --branch 0.15
+backport-harness scan --from-date 2024-01-01 --to-date 2024-12-31 --branch main
 ```
 
 ### Tasks
@@ -236,9 +233,8 @@ Meaning:
 
 ### Acceptance criteria
 
-- Can scan `master`.
-- Can scan `0.15`.
-- Can scan both when branch omitted.
+- Can scan configured source branches such as `main`.
+- Can scan all configured branches when branch is omitted.
 - Can scan a historical range.
 - Re-running same scan does not duplicate data.
 - Slow scanning delay is visible in logs.
@@ -257,8 +253,7 @@ backport-harness list-prs
 Filters:
 
 ```bash
-backport-harness list-prs --branch master
-backport-harness list-prs --branch 0.15
+backport-harness list-prs --branch main
 backport-harness list-prs --status QUEUED_FOR_ANALYSIS
 backport-harness list-prs --from-date 2024-01-01 --to-date 2024-12-31
 backport-harness list-prs --limit 50
@@ -276,9 +271,9 @@ backport-harness list-prs --limit 50
 
 ```text
 PR       Branch   Merged at    Queue status          Decision                  Title
-#12345   0.15     2024-02-10   QUEUED_FOR_ANALYSIS   -                         Fix NPE in compaction
-#12346   master   2024-02-12   DONE                  MASTER_NOT_APPLICABLE     Fix new feature bug
-#12347   master   2024-02-14   REPORTABLE            MASTER_REPRODUCED_ON_015  Fix race in metadata table
+#12345   main     2024-02-10   QUEUED_FOR_ANALYSIS   -                         Fix NPE in compaction
+#12346   main     2024-02-12   DONE                  SOURCE_NOT_APPLICABLE     Fix new feature bug
+#12347   main     2024-02-14   REPORTABLE            SOURCE_REPRODUCED_ON_TARGET  Fix race in metadata table
 ```
 
 ### Acceptance criteria
@@ -305,7 +300,7 @@ Show:
 
 - PR title.
 - PR URL.
-- Target branch.
+- Upstream branch.
 - Merged commit.
 - Merged date.
 - Author.
@@ -342,9 +337,9 @@ Suggested initial priority:
 
 | Priority | Condition |
 |---:|---|
-| 10 | Target branch `0.15` |
-| 20 | Master PR with labels/title indicating bug, regression, correctness, NPE, race, corruption, data loss |
-| 50 | Master PR with ambiguous fix-like title |
+| 10 | Upstream branch equals the configured target-ref label |
+| 20 | Source-branch PR with labels/title indicating bug, regression, correctness, NPE, race, corruption, data loss |
+| 50 | Source-branch PR with ambiguous fix-like title |
 | 100 | Everything else |
 
 Lower number means higher priority.
@@ -387,12 +382,12 @@ backport-harness prepare --pr 12345
 ### Worktree layout
 
 ```text
-workspace/worktrees/pr-12345-015/
+workspace/worktrees/pr-12345-v7.0.0/
 ```
 
-The default Hudi target ref is `origin/release-0.15.0` with suffix `015`.
-Non-default public-only runs may set another public target ref and suffix, for
-example a release tag.
+The target ref and suffix come from `local_repo.target_ref`. The default Lance
+config uses tag `refs/tags/v7.0.0` with suffix `v7.0.0`; the Hudi example uses
+`origin/release-0.15.0`.
 
 ### Acceptance criteria
 
@@ -434,7 +429,7 @@ workspace/tasks/pr-12345/
 ### Acceptance criteria
 
 - Task bundle contains all public context needed by Codex.
-- Instructions differ for `master` and `0.15` PRs.
+- Instructions differ for configured target-branch PRs and source-branch PRs.
 - Output directories are pre-created.
 - Bundle does not include private repo data.
 
@@ -445,20 +440,21 @@ workspace/tasks/pr-12345/
 ### Files
 
 ```text
-prompts/analyze_015_pr.md
-prompts/analyze_master_pr.md
+prompts/analyze_target_branch_pr.md
+prompts/analyze_source_branch_pr.md
 prompts/transplant_test.md
 prompts/verify_fix.md
 ```
 
-### `analyze_015_pr.md` responsibilities
+### `analyze_target_branch_pr.md` responsibilities
 
-Codex should decide whether a PR merged into upstream `0.15` is a real bugfix and should be added to the backport queue.
+Codex should decide whether a PR merged into the configured upstream target
+branch label is a real bugfix and should be added to the backport queue.
 
 Allowed decisions:
 
 ```text
-DIRECT_015_BUGFIX
+TARGET_BRANCH_BUGFIX
 DISCARDED_NON_BUGFIX
 DISCARDED_DOCS_ONLY
 DISCARDED_CI_ONLY
@@ -468,12 +464,12 @@ INCONCLUSIVE
 FAILED_INFRA
 ```
 
-### `analyze_master_pr.md` responsibilities
+### `analyze_source_branch_pr.md` responsibilities
 
 Codex should:
 
 - Classify whether PR is a real bugfix.
-- Check whether affected code exists in public OSS `0.15`.
+- Check whether affected code exists in the configured public target ref.
 - Determine applicability.
 - Optionally transplant tests.
 - Optionally verify adapted fix.
@@ -481,10 +477,10 @@ Codex should:
 Allowed decisions:
 
 ```text
-MASTER_NOT_APPLICABLE
-MASTER_POSSIBLY_APPLICABLE
-MASTER_REPRODUCED_ON_015
-MASTER_FIX_VERIFIED_ON_015
+SOURCE_NOT_APPLICABLE
+SOURCE_POSSIBLY_APPLICABLE
+SOURCE_REPRODUCED_ON_TARGET
+SOURCE_FIX_VERIFIED_ON_TARGET
 INCONCLUSIVE
 NEEDS_HUMAN_REVIEW
 DISCARDED_NON_BUGFIX
@@ -509,7 +505,6 @@ FAILED_INFRA
 ### Command
 
 ```bash
-backport-harness analyze --limit 5
 backport-harness analyze --pr 12345
 ```
 
@@ -568,7 +563,7 @@ If Codex times out:
 
 - `schema_version`
 - `pr_number`
-- `target_branch`
+- `upstream_branch`
 - `decision`
 - `confidence`
 - `summary`
@@ -598,7 +593,7 @@ If Codex times out:
 
 ### Decision-specific validation
 
-#### `MASTER_FIX_VERIFIED_ON_015`
+#### `SOURCE_FIX_VERIFIED_ON_TARGET`
 
 Require:
 
@@ -610,7 +605,7 @@ Require:
 - Test failure evidence exists.
 - Test pass evidence exists.
 
-#### `MASTER_REPRODUCED_ON_015`
+#### `SOURCE_REPRODUCED_ON_TARGET`
 
 Require:
 
@@ -619,7 +614,7 @@ Require:
 - Test log exists.
 - Expected failure reason exists.
 
-#### `MASTER_NOT_APPLICABLE`
+#### `SOURCE_NOT_APPLICABLE`
 
 Require strong non-applicability reason:
 
@@ -627,8 +622,8 @@ Require strong non-applicability reason:
 - Affected class absent.
 - Affected module absent.
 - Feature absent.
-- Bug introduced after `0.15`.
-- Fix behavior already present in public OSS `0.15`.
+- Bug introduced after the configured public target ref.
+- Fix behavior already present in the configured public target ref.
 
 #### `INCONCLUSIVE`
 
@@ -692,15 +687,15 @@ reports/full-audit.jsonl
 
 Include:
 
-- `DIRECT_015_BUGFIX`
-- `MASTER_REPRODUCED_ON_015`
-- `MASTER_FIX_VERIFIED_ON_015`
+- `TARGET_BRANCH_BUGFIX`
+- `SOURCE_REPRODUCED_ON_TARGET`
+- `SOURCE_FIX_VERIFIED_ON_TARGET`
 - `NEEDS_HUMAN_REVIEW`
 
 Columns:
 
 - PR
-- Target branch
+- Upstream branch
 - Merged date
 - Decision
 - Confidence
@@ -721,7 +716,7 @@ Include:
 
 Include:
 
-- `MASTER_NOT_APPLICABLE`
+- `SOURCE_NOT_APPLICABLE`
 - `DISCARDED_NON_BUGFIX`
 - `DISCARDED_DOCS_ONLY`
 - `DISCARDED_CI_ONLY`
@@ -841,7 +836,7 @@ This can be implemented after MVP is useful.
 ### Tasks for Codex
 
 - Identify regression tests in PR.
-- Transplant or adapt test to OSS `0.15`.
+- Transplant or adapt test to the configured public target ref.
 - Prefer focused test method.
 - Run test.
 - Capture logs.
@@ -870,7 +865,7 @@ test_flaky
 
 - Codex can attempt test transplant.
 - Harness stores before-fix test result.
-- Reproduced bug is reported as `MASTER_REPRODUCED_ON_015`.
+- Reproduced bug is reported as `SOURCE_REPRODUCED_ON_TARGET`.
 - Failed transplant becomes `INCONCLUSIVE`, not discarded.
 
 ---
@@ -881,7 +876,7 @@ This is the highest-confidence phase.
 
 ### Tasks for Codex
 
-- Apply or adapt production fix to OSS `0.15`.
+- Apply or adapt production fix to the configured public target ref.
 - Run the same focused test again.
 - Capture logs.
 - Save adapted patch.
@@ -892,7 +887,7 @@ This is the highest-confidence phase.
 - Validate patch path.
 - Validate after-fix test passed.
 - Store patch path and logs.
-- Upgrade decision to `MASTER_FIX_VERIFIED_ON_015`.
+- Upgrade decision to `SOURCE_FIX_VERIFIED_ON_TARGET`.
 
 ### Acceptance criteria
 
@@ -969,11 +964,11 @@ backport-harness db init
 
 backport-harness scan --from-date 2024-01-01 --to-date 2024-12-31
 
-backport-harness list-prs --branch 0.15 --limit 20
+backport-harness list-prs --branch main --limit 20
 
-backport-harness analyze --branch 0.15 --limit 5 --dry-run
+backport-harness analyze --dry-run --limit 5
 
-backport-harness analyze --branch 0.15 --limit 5
+backport-harness analyze --pr 12345
 
 backport-harness report
 
@@ -1047,7 +1042,7 @@ backport-harness scan --from-date 2024-01-01 --to-date 2024-02-01
 backport-harness list-prs
 backport-harness inspect --pr 12345
 backport-harness analyze --limit 3 --dry-run
-backport-harness analyze --limit 1
+backport-harness analyze --pr 12345
 backport-harness report
 ```
 
@@ -1098,7 +1093,7 @@ Every prompt should explicitly state:
 
 ```text
 Do not use or request private fork access.
-Use only the provided public upstream repository and public OSS 0.15 worktree.
+Use only the provided public upstream repository and configured public target-ref worktree.
 ```
 
 ---
@@ -1114,12 +1109,11 @@ backport-harness scan --from-date 2024-01-01 --to-date 2024-12-31
 
 # 3. Look at saved PRs
 backport-harness list-prs --limit 100
-backport-harness list-prs --branch 0.15
-backport-harness list-prs --branch master
+backport-harness list-prs --branch main
 
 # 4. Analyze a small batch because Codex limits are strict
 backport-harness analyze --limit 5 --dry-run
-backport-harness analyze --limit 5
+backport-harness analyze --pr 12345
 
 # 5. Recover stale runs if interrupted
 backport-harness recover-stale
