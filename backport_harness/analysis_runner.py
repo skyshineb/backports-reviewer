@@ -59,6 +59,7 @@ def analyze_one_pr(
                 output_result_path=bundle.task_dir / config.codex.result_file,
                 command=config.codex.command,
                 github_token_env=config.github.token_env,
+                reasoning_effort=config.codex.reasoning_effort,
             )
         )
     except Exception as error:

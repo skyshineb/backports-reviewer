@@ -64,6 +64,7 @@ def test_run_codex_invokes_expected_argv_and_writes_logs(
         "-o",
         args[7],
     ]
+    assert args[8:10] == ["-c", 'model_reasoning_effort="medium"']
     assert args[-1] == "do work"
     assert kwargs["cwd"] == tmp_path
     assert kwargs["start_new_session"] is True
@@ -75,6 +76,32 @@ def test_run_codex_invokes_expected_argv_and_writes_logs(
     assert result.stderr_log_path.read_text(encoding="utf-8") == "stderr\n"
     assert result.last_message_path is not None
     assert result.last_message_path.name == "last-message.jsonl"
+
+
+def test_run_codex_uses_configured_reasoning_effort(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+
+    run_codex(
+        CodexRunRequest(
+            prompt="do work",
+            cwd=tmp_path,
+            timeout_seconds=30,
+            output_result_path=tmp_path / "output" / "codex_result.json",
+            reasoning_effort="high",
+        )
+    )
+
+    args = calls[0][0]
+    assert args[args.index("-c") + 1] == 'model_reasoning_effort="high"'
 
 
 def test_run_codex_timeout_signals_process_group(tmp_path: Path, monkeypatch) -> None:

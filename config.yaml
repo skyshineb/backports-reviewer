@@ -26,6 +26,7 @@ codex:
   timeout_seconds: 7200
   max_attempts_per_pr: 2
   result_file: output/codex_result.json
+  reasoning_effort: medium
 
 analysis:
   default_limit: 5

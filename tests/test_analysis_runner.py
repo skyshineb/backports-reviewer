@@ -111,15 +111,22 @@ def test_analyze_one_pr_stores_successful_validated_codex_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config(tmp_path)
+    config = replace(config, codex=replace(config.codex, reasoning_effort="high"))
     init_database(config.storage.sqlite_path)
     task_dir, bundle = _make_bundle(tmp_path)
     _write_valid_codex_result(task_dir)
+    codex_requests = []
 
     with connect(config.storage.sqlite_path) as connection:
         pr_id = _insert_saved_pr(connection, status="QUEUED_FOR_ANALYSIS")
 
     monkeypatch.setattr("backport_harness.analysis_runner.build_task_bundle", lambda **kwargs: bundle)
-    monkeypatch.setattr("backport_harness.analysis_runner.run_codex", _successful_codex_run)
+
+    def capture_codex_request(request):
+        codex_requests.append(request)
+        return _successful_codex_run(request)
+
+    monkeypatch.setattr("backport_harness.analysis_runner.run_codex", capture_codex_request)
 
     result = analyze_one_pr(config=config, pr_number=12345)
 
@@ -166,6 +173,7 @@ def test_analyze_one_pr_stores_successful_validated_codex_result(
 
     assert result.validation is not None
     assert result.validation.valid is True
+    assert codex_requests[0].reasoning_effort == "high"
     assert queue_row == ("REPORTABLE", None, None, None)
     assert run_row == ("VALIDATED", 0)
     assert decision_row == (
