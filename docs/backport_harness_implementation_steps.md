@@ -5,6 +5,8 @@
 Build a Python-based Backport Harness that:
 
 - Scans public upstream PRs merged into `master` and `0.15`.
+- Supports configured public upstream branches and public target refs for
+  non-default public-only runs.
 - Supports historical catch-up via `--from-date` and `--to-date`.
 - Stores all data in SQLite.
 - Lets users list and inspect saved PRs before analysis.
@@ -150,6 +152,10 @@ local_repo:
   upstream_url: https://github.com/apache/hudi.git
   repo_dir: "./workspace/upstream"
   worktree_dir: "./workspace/worktrees"
+  target_ref:
+    label: "0.15"
+    ref: "origin/release-0.15.0"
+    worktree_suffix: "015"
 
 codex:
   command: "codex"
@@ -363,7 +369,7 @@ backport-harness analyze --limit 10 --dry-run
 - Implement `worktree_manager.py`.
 - Clone public upstream repo if missing.
 - Fetch branches.
-- Create clean OSS `0.15` worktree per PR.
+- Create clean OSS configured target-ref worktree per PR.
 - Remove worktree if configured.
 - Prevent accidental use of private repo path.
 
@@ -381,11 +387,15 @@ backport-harness prepare --pr 12345
 workspace/worktrees/pr-12345-015/
 ```
 
+The default Hudi target ref is `origin/release-0.15.0` with suffix `015`.
+Non-default public-only runs may set another public target ref and suffix, for
+example a release tag.
+
 ### Acceptance criteria
 
 - Upstream repo is cloned.
 - Branches are fetched.
-- Clean `0.15` worktree is created.
+- Clean configured target-ref worktree is created.
 - Existing stale worktree is replaced safely.
 - Private paths are never referenced.
 
@@ -412,7 +422,7 @@ workspace/tasks/pr-12345/
   files_changed.json
   pr.diff
   instructions.md
-  oss_015_worktree/
+  target_worktree/
   output/
     logs/
     patches/

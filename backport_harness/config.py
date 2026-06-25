@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,9 @@ DEFAULT_MAX_RETRIES = 5
 DEFAULT_BACKOFF_MULTIPLIER = 2.0
 DEFAULT_RESPECT_RATE_LIMIT = True
 DEFAULT_ANALYSIS_LIMIT = 5
+DEFAULT_TARGET_LABEL = "0.15"
+DEFAULT_TARGET_REF = "origin/release-0.15.0"
+DEFAULT_TARGET_WORKTREE_SUFFIX = "015"
 
 TOKEN_FIELD_NAMES = {"token", "github_token", "access_token"}
 
@@ -35,10 +38,18 @@ class GithubConfig:
 
 
 @dataclass(frozen=True)
+class TargetRefConfig:
+    label: str = DEFAULT_TARGET_LABEL
+    ref: str = DEFAULT_TARGET_REF
+    worktree_suffix: str = DEFAULT_TARGET_WORKTREE_SUFFIX
+
+
+@dataclass(frozen=True)
 class LocalRepoConfig:
     upstream_url: str
     repo_dir: Path
     worktree_dir: Path
+    target_ref: TargetRefConfig = field(default_factory=TargetRefConfig)
 
 
 @dataclass(frozen=True)
@@ -154,6 +165,33 @@ def _load_local_repo_config(
         upstream_url=_required_str(section, "upstream_url", "local_repo"),
         repo_dir=_required_path(section, "repo_dir", "local_repo", base_dir),
         worktree_dir=_required_path(section, "worktree_dir", "local_repo", base_dir),
+        target_ref=_load_target_ref_config(section),
+    )
+
+
+def _load_target_ref_config(section: dict[str, Any]) -> TargetRefConfig:
+    target_ref = _optional_mapping(section, "target_ref")
+    suffix = _optional_str(
+        target_ref,
+        "worktree_suffix",
+        DEFAULT_TARGET_WORKTREE_SUFFIX,
+        "local_repo.target_ref",
+    )
+    _validate_path_segment(suffix, "local_repo.target_ref.worktree_suffix")
+    return TargetRefConfig(
+        label=_optional_str(
+            target_ref,
+            "label",
+            DEFAULT_TARGET_LABEL,
+            "local_repo.target_ref",
+        ),
+        ref=_optional_str(
+            target_ref,
+            "ref",
+            DEFAULT_TARGET_REF,
+            "local_repo.target_ref",
+        ),
+        worktree_suffix=suffix,
     )
 
 
@@ -246,6 +284,17 @@ def _required_str(section: dict[str, Any], key: str, section_name: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"Config value '{section_name}.{key}' is required.")
     return value
+
+
+def _optional_str(
+    section: dict[str, Any],
+    key: str,
+    default: str,
+    section_name: str,
+) -> str:
+    if key not in section:
+        return default
+    return _required_str(section, key, section_name)
 
 
 def _required_int(section: dict[str, Any], key: str, section_name: str) -> int:
@@ -349,6 +398,11 @@ def _coerce_str_list(value: Any, name: str, allow_empty: bool = False) -> list[s
     if not all(isinstance(item, str) and item for item in value):
         raise ValueError(f"Config value '{name}' must contain only non-empty strings.")
     return list(value)
+
+
+def _validate_path_segment(value: str, name: str) -> None:
+    if value in {".", ".."} or "/" in value or "\\" in value:
+        raise ValueError(f"Config value '{name}' must be a safe path segment.")
 
 
 def _reject_embedded_tokens(value: Any, path: str) -> None:

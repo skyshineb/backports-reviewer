@@ -37,7 +37,12 @@ class ValidationOutcome:
         return "; ".join(f"{issue.field}: {issue.message}" for issue in self.issues)
 
 
-def validate_codex_result_file(*, task_dir: Path, result_path: Path) -> ValidationOutcome:
+def validate_codex_result_file(
+    *,
+    task_dir: Path,
+    result_path: Path,
+    expected_target_branch: str | None = None,
+) -> ValidationOutcome:
     issues: list[ValidationIssue] = []
     if not result_path.exists():
         return _invalid("result_path", f"Codex result file does not exist: {result_path}")
@@ -47,6 +52,7 @@ def validate_codex_result_file(*, task_dir: Path, result_path: Path) -> Validati
     except (OSError, ValueError, ValidationError) as error:
         return _invalid("result_path", f"Codex result schema validation failed: {error}")
 
+    issues.extend(_validate_target_branch(result, expected_target_branch))
     issues.extend(_validate_referenced_logs(task_dir, result))
     issues.extend(_validate_referenced_patches(task_dir, result))
     issues.extend(_validate_decision_specific_claims(task_dir, result))
@@ -54,6 +60,21 @@ def validate_codex_result_file(*, task_dir: Path, result_path: Path) -> Validati
     if issues:
         return ValidationOutcome(valid=False, result=result, issues=tuple(issues))
     return ValidationOutcome(valid=True, result=result)
+
+
+def _validate_target_branch(
+    result: CodexResult,
+    expected_target_branch: str | None,
+) -> list[ValidationIssue]:
+    if expected_target_branch is None or result.target_branch == expected_target_branch:
+        return []
+    return [
+        ValidationIssue(
+            "target_branch",
+            "Codex result target_branch does not match saved PR target branch: "
+            f"{result.target_branch} != {expected_target_branch}.",
+        )
+    ]
 
 
 def _validate_referenced_logs(task_dir: Path, result: CodexResult) -> list[ValidationIssue]:
@@ -303,7 +324,7 @@ def _validate_master_not_applicable(result: CodexResult) -> list[ValidationIssue
         issues.append(
             ValidationIssue(
                 "applicability.reason",
-                "Non-applicability must cite absent file, class, module, feature, bug introduced after 0.15, or fix behavior already present in OSS 0.15.",
+                "Non-applicability must cite absent file, class, module, feature, bug introduced after the configured target ref, or fix behavior already present in the configured public target ref.",
             )
         )
     return issues

@@ -124,6 +124,12 @@ def test_parse_valid_015_result() -> None:
     assert result.fix_verification.result is None
 
 
+def test_parse_valid_configured_upstream_branch_result() -> None:
+    result = parse_result(valid_result(target_branch="main"))
+
+    assert result.target_branch == "main"
+
+
 def test_load_codex_result_from_path(tmp_path: Path) -> None:
     result_path = tmp_path / "codex_result.json"
     result_path.write_text(json.dumps(valid_result()), encoding="utf-8")
@@ -151,7 +157,6 @@ def test_missing_required_field_fails_validation() -> None:
     [
         ("decision", "UNKNOWN_DECISION"),
         ("confidence", "certain"),
-        ("target_branch", "release-1.0"),
         ("schema_version", 2),
     ],
 )

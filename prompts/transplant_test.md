@@ -2,30 +2,30 @@
 
 ## Security Boundary
 
-Use only public upstream data included in the task bundle and the public OSS 0.15 worktree.
+Use only public upstream data included in the task bundle and the configured public target-ref worktree.
 Do not use, request, infer, or reference private fork code, private patches, private repository history, private test data, private business logic, or private paths.
 If a regression test cannot be transplanted from public context, choose `INCONCLUSIVE` or `NEEDS_HUMAN_REVIEW`.
 
 ## Responsibility
 
 Identify a focused public regression test from the PR when one exists.
-Attempt to adapt it to the public OSS 0.15 worktree using only public code.
+Attempt to adapt it to the configured public target-ref worktree using only public code.
 Record the command, exit code, result, and log path under `output/logs/`.
 
 ## No-Test Policy
 
 Do not discard a PR only because no regression test exists.
-Use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists but there is no test proof.
+Use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists but there is no test proof.
 Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.
 
 ## Test Transplant Outcome Policy
 
-- No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.
-- Test not applicable to public OSS 0.15: use `INCONCLUSIVE`.
+- No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
+- Test not applicable to the configured public target ref: use `INCONCLUSIVE`.
 - Transplanted test does not compile: use `INCONCLUSIVE`.
 - Transplanted test fails with the expected bug before fix: use `MASTER_REPRODUCED_ON_015`.
 - Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.
-- Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.
+- Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.
 - Transplanted test is flaky: use `INCONCLUSIVE`.
 
 ## Test Execution Limits
@@ -38,7 +38,7 @@ Save every test or command log under `output/logs/`.
 
 ## Modification Boundaries
 
-Only edit files in the public OSS 0.15 worktree that are needed for transplant or fix verification.
+Only edit files in the configured public target-ref worktree that are needed for transplant or fix verification.
 Do not modify task input files, including `pr.json`, `files_changed.json`, and `pr.diff`.
 Write any generated patch under `output/patches/`.
 Write human-readable notes to `output/notes.md`.
@@ -90,7 +90,7 @@ The JSON object must include these top-level fields:
 `confidence` must be one of:
 
 - `very_high`: test fails before fix and passes after adapted fix.
-- `high`: regression test reproduces the bug on OSS 0.15.
+- `high`: regression test reproduces the bug on the configured public target ref.
 - `medium`: relevant code/logic exists but no test proof.
 - `low`: weak relevance signals only.
 - `unknown`: inconclusive.
@@ -101,6 +101,8 @@ The JSON object must include these top-level fields:
 - `reason`: non-empty string.
 - `affected_public_paths`: array of repository-relative public paths.
 - `missing_public_paths`: array of repository-relative public paths.
+
+The `applies_to_oss_015` field retains its historical name; interpret it as applicability to the configured public target ref for this task.
 
 `test_transplant` must be an object with:
 

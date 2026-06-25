@@ -55,6 +55,7 @@ class AnalysisStart:
     pr_id: int
     analysis_run_id: int
     run_id: str
+    target_branch: str
     attempts: int
 
 
@@ -528,7 +529,7 @@ def start_analysis_run(
     now = _utc_now()
     row = connection.execute(
         """
-        SELECT prs.id, analysis_queue.status, analysis_queue.attempts
+        SELECT prs.id, prs.target_branch, analysis_queue.status, analysis_queue.attempts
         FROM prs
         JOIN analysis_queue ON analysis_queue.pr_id = prs.id
         WHERE prs.github_pr_number = ?
@@ -541,8 +542,9 @@ def start_analysis_run(
         raise ValueError(f"No queued saved PR found for #{pr_number}.")
 
     pr_id = int(row[0])
-    status = str(row[1])
-    attempts = int(row[2]) + 1
+    target_branch = str(row[1])
+    status = str(row[2])
+    attempts = int(row[3]) + 1
     if status not in RETRYABLE_QUEUE_STATUSES:
         raise ValueError(f"PR #{pr_number} is not retryable from status {status}.")
 
@@ -576,6 +578,7 @@ def start_analysis_run(
         pr_id=pr_id,
         analysis_run_id=int(cursor.lastrowid),
         run_id=run_id,
+        target_branch=target_branch,
         attempts=attempts,
     )
 

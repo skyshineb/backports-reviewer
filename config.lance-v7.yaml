@@ -1,9 +1,8 @@
 github:
-  owner: apache
-  repo: hudi
+  owner: lance-format
+  repo: lance
   branches:
-    - master
-    - "0.15"
+    - main
   token_env: GITHUB_TOKEN
   request_delay_seconds: 1.0
   page_delay_seconds: 2.0
@@ -12,13 +11,13 @@ github:
   respect_rate_limit: true
 
 local_repo:
-  upstream_url: https://github.com/apache/hudi.git
-  repo_dir: ./workspace/upstream
-  worktree_dir: ./workspace/worktrees
+  upstream_url: https://github.com/lance-format/lance.git
+  repo_dir: ./workspace/lance-v7/upstream
+  worktree_dir: ./workspace/lance-v7/worktrees
   target_ref:
-    label: "0.15"
-    ref: origin/release-0.15.0
-    worktree_suffix: "015"
+    label: v7.0.0
+    ref: refs/tags/v7.0.0
+    worktree_suffix: v7.0.0
 
 codex:
   command: codex
@@ -32,7 +31,7 @@ analysis:
   stale_timeout_seconds: 7200
 
 reports:
-  output_dir: ./reports
+  output_dir: ./reports/lance-v7
 
 storage:
-  sqlite_path: ./workspace/backport_harness.sqlite3
+  sqlite_path: ./workspace/lance-v7/backport_harness.sqlite3

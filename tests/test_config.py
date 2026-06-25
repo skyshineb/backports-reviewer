@@ -5,6 +5,9 @@ import pytest
 from backport_harness.config import (
     DEFAULT_CODEX_TIMEOUT_SECONDS,
     DEFAULT_STALE_TIMEOUT_SECONDS,
+    DEFAULT_TARGET_LABEL,
+    DEFAULT_TARGET_REF,
+    DEFAULT_TARGET_WORKTREE_SUFFIX,
     load_config,
 )
 
@@ -24,6 +27,10 @@ local_repo:
   upstream_url: https://github.com/apache/hudi.git
   repo_dir: ./workspace/upstream
   worktree_dir: ./workspace/worktrees
+  target_ref:
+    label: "0.15"
+    ref: origin/release-0.15.0
+    worktree_suffix: "015"
 
 codex:
   command: codex
@@ -52,6 +59,92 @@ def test_load_config_returns_typed_config(tmp_path: Path) -> None:
     assert config.github.repo == "hudi"
     assert config.github.branches == ["master", "0.15"]
     assert config.local_repo.upstream_url == "https://github.com/apache/hudi.git"
+    assert config.local_repo.target_ref.label == DEFAULT_TARGET_LABEL
+    assert config.local_repo.target_ref.ref == DEFAULT_TARGET_REF
+    assert config.local_repo.target_ref.worktree_suffix == DEFAULT_TARGET_WORKTREE_SUFFIX
+
+
+def test_load_config_reads_custom_target_ref(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+github:
+  owner: lance-format
+  repo: lance
+  branches:
+    - main
+  token_env: GITHUB_TOKEN
+
+local_repo:
+  upstream_url: https://github.com/lance-format/lance.git
+  repo_dir: ./workspace/lance/upstream
+  worktree_dir: ./workspace/lance/worktrees
+  target_ref:
+    label: v7.0.0
+    ref: refs/tags/v7.0.0
+    worktree_suffix: v7.0.0
+
+codex:
+  command: codex
+  mode: exec
+  max_attempts_per_pr: 2
+  result_file: output/codex_result.json
+
+reports:
+  output_dir: ./reports
+
+storage:
+  sqlite_path: ./workspace/backport_harness.sqlite3
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.local_repo.target_ref.label == "v7.0.0"
+    assert config.local_repo.target_ref.ref == "refs/tags/v7.0.0"
+    assert config.local_repo.target_ref.worktree_suffix == "v7.0.0"
+
+
+def test_load_config_rejects_unsafe_target_ref_worktree_suffix(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+github:
+  owner: lance-format
+  repo: lance
+  branches:
+    - main
+  token_env: GITHUB_TOKEN
+
+local_repo:
+  upstream_url: https://github.com/lance-format/lance.git
+  repo_dir: ./workspace/lance/upstream
+  worktree_dir: ./workspace/lance/worktrees
+  target_ref:
+    label: unsafe
+    ref: refs/tags/unsafe
+    worktree_suffix: ../unsafe
+
+codex:
+  command: codex
+  mode: exec
+  max_attempts_per_pr: 2
+  result_file: output/codex_result.json
+
+reports:
+  output_dir: ./reports
+
+storage:
+  sqlite_path: ./workspace/backport_harness.sqlite3
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="safe path segment"):
+        load_config(config_path)
 
 
 def test_load_config_applies_defaults(tmp_path: Path) -> None:

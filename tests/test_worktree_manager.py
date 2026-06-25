@@ -1,10 +1,15 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from backport_harness.config import TargetRefConfig
 from backport_harness.git_runner import GitCommandError, GitResult
 from backport_harness.security import SecurityError
-from backport_harness.worktree_manager import prepare_oss_015_worktree
+from backport_harness.worktree_manager import (
+    prepare_oss_015_worktree,
+    prepare_target_worktree,
+)
 from tests.test_repo_manager import make_config
 
 
@@ -41,6 +46,53 @@ def test_prepare_oss_015_worktree_creates_detached_worktree(
             str(target),
             "origin/release-0.15.0",
         ]
+    ]
+
+
+def test_prepare_target_worktree_uses_configured_target_ref(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config = make_config(tmp_path)
+    config = replace(
+        config,
+        local_repo=replace(
+            config.local_repo,
+            target_ref=TargetRefConfig(
+                label="v7.0.0",
+                ref="refs/tags/v7.0.0",
+                worktree_suffix="v7.0.0",
+            ),
+        ),
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        "backport_harness.worktree_manager.ensure_upstream_repo",
+        lambda config: config.local_repo.repo_dir,
+    )
+
+    def fake_run_git(args):
+        calls.append(args)
+        return GitResult(args=args, stdout="", stderr="")
+
+    monkeypatch.setattr("backport_harness.worktree_manager.run_git", fake_run_git)
+
+    target = prepare_target_worktree(config, pr_number=12345)
+
+    assert target == config.local_repo.worktree_dir / "pr-12345-v7.0.0"
+    assert calls == [
+        ["git", "-C", str(config.local_repo.repo_dir), "worktree", "prune"],
+        [
+            "git",
+            "-C",
+            str(config.local_repo.repo_dir),
+            "worktree",
+            "add",
+            "--detach",
+            str(target),
+            "refs/tags/v7.0.0",
+        ],
     ]
 
 

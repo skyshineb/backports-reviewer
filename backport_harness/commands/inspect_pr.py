@@ -112,7 +112,7 @@ def _render_decision(console: Console, pull_request: InspectedPullRequest) -> No
     table.add_row("Decision", decision.decision)
     table.add_row("Confidence", decision.confidence)
     table.add_row("Bugfix class", decision.bugfix_classification or "-")
-    table.add_row("Applies to OSS 0.15", _format_optional_bool(decision.applies_to_oss_015))
+    table.add_row("Applies to target ref", _format_optional_bool(decision.applies_to_oss_015))
     table.add_row("Reason", decision.reason)
     table.add_row("Human action", decision.human_action or "-")
     table.add_row("Created at", decision.created_at)

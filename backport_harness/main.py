@@ -24,7 +24,7 @@ from backport_harness.state_machine import (
 )
 from backport_harness.storage import HUMAN_REVIEW_STATUSES, init_database
 from backport_harness.task_builder import build_task_bundle
-from backport_harness.worktree_manager import prepare_oss_015_worktree
+from backport_harness.worktree_manager import prepare_target_worktree
 
 app = typer.Typer(help="Public upstream backport review harness.")
 db_app = typer.Typer(help="Manage the harness SQLite database.")
@@ -236,16 +236,16 @@ def prepare(
     pr: int = typer.Option(
         ...,
         "--pr",
-        help="GitHub PR number to prepare a public OSS 0.15 worktree for.",
+        help="GitHub PR number to prepare a configured public target-ref worktree for.",
     ),
 ) -> None:
-    """Prepare a public OSS 0.15 worktree for one PR."""
+    """Prepare a configured public target-ref worktree for one PR."""
     if pr < 1:
         raise typer.BadParameter("pr must be a positive integer.")
 
     config = _require_config(ctx)
     try:
-        worktree_path = prepare_oss_015_worktree(config, pr_number=pr)
+        worktree_path = prepare_target_worktree(config, pr_number=pr)
     except (RuntimeError, ValueError) as error:
         raise typer.BadParameter(str(error)) from error
 

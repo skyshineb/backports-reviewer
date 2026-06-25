@@ -22,7 +22,7 @@ def test_build_task_bundle_writes_expected_files_and_directories(
     calls = []
 
     monkeypatch.setattr(
-        "backport_harness.task_builder.prepare_oss_015_worktree",
+        "backport_harness.task_builder.prepare_target_worktree",
         lambda config, pr_number: config.local_repo.worktree_dir / "pr-12345-015",
     )
 
@@ -85,7 +85,7 @@ def test_build_task_bundle_generates_branch_specific_instructions(
     _insert_saved_pr(sqlite_path, number=1, branch="master")
     _insert_saved_pr(sqlite_path, number=2, branch="0.15")
     monkeypatch.setattr(
-        "backport_harness.task_builder.prepare_oss_015_worktree",
+        "backport_harness.task_builder.prepare_target_worktree",
         lambda config, pr_number: config.local_repo.worktree_dir / f"pr-{pr_number}-015",
     )
     monkeypatch.setattr(
@@ -98,17 +98,23 @@ def test_build_task_bundle_generates_branch_specific_instructions(
 
     master_instructions = master_bundle.instructions_path.read_text(encoding="utf-8")
     branch_instructions = branch_bundle.instructions_path.read_text(encoding="utf-8")
-    assert "Analyze Upstream Master PR" in master_instructions
-    assert "applicable to public OSS 0.15" in master_instructions
+    assert "Analyze Upstream Source-Branch PR" in master_instructions
+    assert "applicable to the configured public target ref" in master_instructions
     assert (
-        f"Public OSS 0.15 worktree: `{config.local_repo.worktree_dir / 'pr-1-015'}`"
+        "Configured public target ref: `0.15` (`origin/release-0.15.0`)"
+        in master_instructions
+    )
+    assert (
+        "Configured public target-ref worktree: "
+        f"`{config.local_repo.worktree_dir / 'pr-1-015'}`"
         in master_instructions
     )
     assert "worktree path supplied by the task builder" not in master_instructions
     assert "Analyze Upstream 0.15 PR" in branch_instructions
     assert "DIRECT_015_BUGFIX" in branch_instructions
     assert (
-        f"Public OSS 0.15 worktree: `{config.local_repo.worktree_dir / 'pr-2-015'}`"
+        "Configured public target-ref worktree: "
+        f"`{config.local_repo.worktree_dir / 'pr-2-015'}`"
         in branch_instructions
     )
     assert "worktree path supplied by the task builder" not in branch_instructions
@@ -127,7 +133,7 @@ def test_build_task_bundle_instructions_exclude_forbidden_private_paths(
     init_database(sqlite_path)
     _insert_saved_pr(sqlite_path, branch="master")
     monkeypatch.setattr(
-        "backport_harness.task_builder.prepare_oss_015_worktree",
+        "backport_harness.task_builder.prepare_target_worktree",
         lambda config, pr_number: config.local_repo.worktree_dir / "pr-12345-015",
     )
     monkeypatch.setattr(
@@ -152,7 +158,7 @@ def test_build_task_bundle_replaces_existing_safe_task_dir(
     stale_file.parent.mkdir(parents=True)
     stale_file.write_text("stale", encoding="utf-8")
     monkeypatch.setattr(
-        "backport_harness.task_builder.prepare_oss_015_worktree",
+        "backport_harness.task_builder.prepare_target_worktree",
         lambda config, pr_number: config.local_repo.worktree_dir / "pr-12345-015",
     )
     monkeypatch.setattr(
@@ -184,7 +190,7 @@ def test_build_task_bundle_rejects_missing_merge_commit(
     init_database(sqlite_path)
     _insert_saved_pr(sqlite_path, branch="master", merged_commit_sha=None)
     monkeypatch.setattr(
-        "backport_harness.task_builder.prepare_oss_015_worktree",
+        "backport_harness.task_builder.prepare_target_worktree",
         lambda config, pr_number: config.local_repo.worktree_dir / "pr-12345-015",
     )
 

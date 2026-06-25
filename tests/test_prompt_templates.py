@@ -32,7 +32,7 @@ CONFIDENCE_VALUES = [
 ]
 CONFIDENCE_MAPPINGS = [
     "`very_high`: test fails before fix and passes after adapted fix.",
-    "`high`: regression test reproduces the bug on OSS 0.15.",
+    "`high`: regression test reproduces the bug on the configured public target ref.",
     "`medium`: relevant code/logic exists but no test proof.",
     "`low`: weak relevance signals only.",
     "`unknown`: inconclusive.",
@@ -71,6 +71,7 @@ STRUCTURED_CONTRACT_SNIPPETS = [
     "`applies_to_oss_015`: boolean or null when unknown.",
     "`affected_public_paths`: array of repository-relative public paths.",
     "`missing_public_paths`: array of repository-relative public paths.",
+    "The `applies_to_oss_015` field retains its historical name; interpret it as applicability to the configured public target ref for this task.",
     "`test_transplant` must be an object with:",
     "`test_before_fix` must be an object with:",
     "`fix_verification` must be an object with:",
@@ -103,7 +104,7 @@ TEST_EXECUTION_LIMIT_SNIPPETS = [
     "Save every test or command log under `output/logs/`.",
 ]
 MODIFICATION_BOUNDARY_SNIPPETS = [
-    "Only edit files in the public OSS 0.15 worktree that are needed for transplant or fix verification.",
+    "Only edit files in the configured public target-ref worktree that are needed for transplant or fix verification.",
     "Do not modify task input files, including `pr.json`, `files_changed.json`, and `pr.diff`.",
     "Write any generated patch under `output/patches/`.",
 ]
@@ -112,22 +113,22 @@ NO_TEST_POLICY_SNIPPETS = [
     "Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.",
 ]
 MASTER_NO_TEST_POLICY_SNIPPETS = [
-    "Do not discard a master PR only because no regression test exists.",
-    "Use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists but there is no test proof.",
+    "Do not discard a source-branch PR only because no regression test exists.",
+    "Use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists but there is no test proof.",
     "Use `INCONCLUSIVE` when applicability is unsafe to determine from public context.",
 ]
 TEST_TRANSPLANT_OUTCOME_SNIPPETS = [
-    "No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.",
-    "Test not applicable to public OSS 0.15: use `INCONCLUSIVE`.",
+    "No public regression test found: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.",
+    "Test not applicable to the configured public target ref: use `INCONCLUSIVE`.",
     "Transplanted test does not compile: use `INCONCLUSIVE`.",
     "Transplanted test fails with the expected bug before fix: use `MASTER_REPRODUCED_ON_015`.",
     "Transplanted test fails with an unrelated error: use `INCONCLUSIVE`.",
-    "Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant public OSS 0.15 code or logic exists; otherwise use `INCONCLUSIVE`.",
+    "Transplanted test passes before fix: use `MASTER_POSSIBLY_APPLICABLE` when relevant configured public target-ref code or logic exists; otherwise use `INCONCLUSIVE`.",
     "Transplanted test is flaky: use `INCONCLUSIVE`.",
 ]
 WORKTREE_CONTEXT_SNIPPET = (
-    "Public OSS 0.15 worktree from the rendered task context line "
-    "`Public OSS 0.15 worktree: <path>`"
+    "Configured public target-ref worktree from the rendered task context line "
+    "`Configured public target-ref worktree: <path>`"
 )
 ANALYZE_015_DECISIONS = [
     "DIRECT_015_BUGFIX",
@@ -191,7 +192,7 @@ ANALYSIS_DECISION_SPECIFIC_REQUIREMENTS = [
     "infra_failure` evidence",
     "`test_failure` evidence item",
     "`test_pass` evidence item",
-    "fix behavior already present in public OSS 0.15",
+    "fix behavior already present in the configured public target ref",
 ]
 TRANSPLANT_DECISION_SPECIFIC_REQUIREMENTS = [
     "MASTER_REPRODUCED_ON_015",
@@ -223,11 +224,11 @@ MASTER_INVESTIGATION_SEQUENCE = [
     "3. Classify the PR type.",
     "4. If the PR is non-bugfix, docs-only, CI-only, or release-only, choose the matching discard decision.",
     "5. Inspect production code changes for bugfix behavior.",
-    "6. Check whether each affected module, file, class, or method exists in the public OSS 0.15 worktree.",
-    "7. Compare the master logic with the public OSS 0.15 logic.",
+    "6. Check whether each affected module, file, class, or method exists in the configured public target-ref worktree.",
+    "7. Compare the source-branch logic with the configured public target-ref logic.",
     "8. Decide whether to discard, mark possibly applicable, reproduce with a test, or verify an adapted fix.",
     "9. If a usable public regression test exists, try the smallest focused test transplant.",
-    "10. If reproduction succeeds, optionally apply or adapt the public fix in the public OSS 0.15 worktree, save the adapted patch under `output/patches/`, and rerun the same focused test when possible.",
+    "10. If reproduction succeeds, optionally apply or adapt the public fix in the configured public target-ref worktree, save the adapted patch under `output/patches/`, and rerun the same focused test when possible.",
     "11. Write strict JSON to `output/codex_result.json` and human-readable notes to `output/notes.md`.",
 ]
 
