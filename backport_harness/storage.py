@@ -23,6 +23,15 @@ from backport_harness.state_machine import (
 
 MIGRATIONS_PACKAGE = "backport_harness.migrations"
 MIGRATION_SUFFIX = ".sql"
+SCHEMA_REQUIRED_COLUMNS = {
+    "prs": {"upstream_branch"},
+    "decisions": {"applies_to_target_ref"},
+    "evidence": {"patch_path"},
+}
+SCHEMA_FORBIDDEN_COLUMNS = {
+    "prs": {"target_branch"},
+    "decisions": {"applies_to_oss_015"},
+}
 
 
 @dataclass(frozen=True)
@@ -289,6 +298,8 @@ def run_migrations(connection: sqlite3.Connection) -> None:
                 """,
                 (migration_name, _utc_now()),
             )
+
+    _validate_current_schema(connection)
 
 
 def create_scan_run(
@@ -1627,6 +1638,37 @@ def _load_migrations() -> list[tuple[str, str]]:
         (migration_file.name, migration_file.read_text(encoding="utf-8"))
         for migration_file in migration_files
     ]
+
+
+def _validate_current_schema(connection: sqlite3.Connection) -> None:
+    for table_name, required_columns in SCHEMA_REQUIRED_COLUMNS.items():
+        columns = _table_columns(connection, table_name)
+        missing_columns = sorted(required_columns - columns)
+        if missing_columns:
+            joined_columns = ", ".join(missing_columns)
+            raise RuntimeError(
+                "SQLite schema is not compatible with release 0.1; "
+                f"table '{table_name}' is missing column(s): {joined_columns}. "
+                "Use a fresh database or recreate this SQLite file from public "
+                "source data."
+            )
+
+    for table_name, forbidden_columns in SCHEMA_FORBIDDEN_COLUMNS.items():
+        columns = _table_columns(connection, table_name)
+        stale_columns = sorted(forbidden_columns & columns)
+        if stale_columns:
+            joined_columns = ", ".join(stale_columns)
+            raise RuntimeError(
+                "SQLite schema is not compatible with release 0.1; "
+                f"table '{table_name}' contains pre-0.1 column(s): "
+                f"{joined_columns}. Use a fresh database or recreate this "
+                "SQLite file from public source data."
+            )
+
+
+def _table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
 
 
 def _utc_now() -> str:

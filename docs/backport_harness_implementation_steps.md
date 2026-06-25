@@ -135,8 +135,8 @@ Implement typed config:
 
 ```yaml
 github:
-  owner: lance-format
-  repo: lance
+  owner: OWNER
+  repo: REPO
   branches:
     - main
   token_env: GITHUB_TOKEN
@@ -147,13 +147,13 @@ github:
   respect_rate_limit: true
 
 local_repo:
-  upstream_url: https://github.com/lance-format/lance.git
-  repo_dir: "./workspace/lance-v7/upstream"
-  worktree_dir: "./workspace/lance-v7/worktrees"
+  upstream_url: https://github.com/OWNER/REPO.git
+  repo_dir: "./workspace/default/upstream"
+  worktree_dir: "./workspace/default/worktrees"
   target_ref:
-    label: "v7.0.0"
-    ref: "refs/tags/v7.0.0"
-    worktree_suffix: "v7.0.0"
+    label: "target-ref"
+    ref: "refs/tags/v0.0.0"
+    worktree_suffix: "target-ref"
 
 codex:
   command: "codex"
@@ -168,11 +168,14 @@ analysis:
   stale_timeout_seconds: 7200
 
 reports:
-  output_dir: "./reports/lance-v7"
+  output_dir: "./reports/default"
 
 storage:
-  sqlite_path: "./workspace/lance-v7/backport_harness.sqlite3"
+  sqlite_path: "./workspace/default/backport_harness.sqlite3"
 ```
+
+Concrete repository examples live in `examples/config.lance-v7.yaml` and
+`examples/config.hudi.yaml`.
 
 ### Acceptance criteria
 
@@ -382,12 +385,10 @@ backport-harness prepare --pr 12345
 ### Worktree layout
 
 ```text
-workspace/worktrees/pr-12345-v7.0.0/
+workspace/default/worktrees/pr-12345-target-ref/
 ```
 
-The target ref and suffix come from `local_repo.target_ref`. The default Lance
-config uses tag `refs/tags/v7.0.0` with suffix `v7.0.0`; the Hudi example uses
-`origin/release-0.15.0`.
+The target ref and suffix come from `local_repo.target_ref`.
 
 ### Acceptance criteria
 
@@ -415,7 +416,7 @@ config uses tag `refs/tags/v7.0.0` with suffix `v7.0.0`; the Hudi example uses
 ### Task layout
 
 ```text
-workspace/tasks/pr-12345/
+workspace/default/tasks/pr-12345/
   pr.json
   files_changed.json
   pr.diff
@@ -425,6 +426,9 @@ workspace/tasks/pr-12345/
     logs/
     patches/
 ```
+
+The default task root is `tasks/` next to the configured SQLite file. Operators
+may override it with `security.task_dir`.
 
 ### Acceptance criteria
 
@@ -440,10 +444,10 @@ workspace/tasks/pr-12345/
 ### Files
 
 ```text
-prompts/analyze_target_branch_pr.md
-prompts/analyze_source_branch_pr.md
-prompts/transplant_test.md
-prompts/verify_fix.md
+backport_harness/prompts/analyze_target_branch_pr.md
+backport_harness/prompts/analyze_source_branch_pr.md
+backport_harness/prompts/transplant_test.md
+backport_harness/prompts/verify_fix.md
 ```
 
 ### `analyze_target_branch_pr.md` responsibilities
@@ -677,10 +681,10 @@ backport-harness report
 Generate:
 
 ```text
-reports/backport-candidates.md
-reports/inconclusive.md
-reports/discarded.jsonl
-reports/full-audit.jsonl
+reports.output_dir/backport-candidates.md
+reports.output_dir/inconclusive.md
+reports.output_dir/discarded.jsonl
+reports.output_dir/full-audit.jsonl
 ```
 
 ### `backport-candidates.md`
@@ -830,8 +834,6 @@ failed_to_backport
 ---
 
 ## 21. Milestone 19: test transplantation support
-
-This can be implemented after MVP is useful.
 
 ### Tasks for Codex
 
@@ -984,9 +986,9 @@ backport-harness review --pr 12345 --status accepted_for_backport
 
 ---
 
-## 25. MVP acceptance criteria
+## 25. Release 0.1 acceptance criteria
 
-MVP is complete when:
+Release 0.1 is complete when:
 
 1. `scan --from-date [--to-date]` works.
 2. Scanning is slow/rate-limit-aware.
@@ -1005,66 +1007,46 @@ MVP is complete when:
 
 ---
 
-## 26. Suggested first development sprint
-
-### Sprint goal
-
-Build a useful scanner and reviewable queue without full test transplantation.
-
-### Scope
-
-- Project skeleton.
-- DB schema.
-- Config.
-- GitHub scanner.
-- List PRs.
-- Inspect PR.
-- Analysis queue.
-- Dry-run analysis.
-- Basic Codex invocation.
-- Basic result validation.
-- Report generation.
-
-### Out of scope for first sprint
-
-- Test transplantation.
-- Fix verification.
-- Advanced retry policy.
-- Scan pagination checkpointing.
-- Full human review lifecycle.
-
-### Sprint acceptance demo
+## 26. Release 0.1 operator demo
 
 Run:
 
 ```bash
-backport-harness scan --from-date 2024-01-01 --to-date 2024-02-01
-backport-harness list-prs
-backport-harness inspect --pr 12345
-backport-harness analyze --limit 3 --dry-run
-backport-harness analyze --pr 12345
-backport-harness report
+backport-harness --config config.yaml db init
+backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-02-01 --branch main
+backport-harness --config config.yaml list-prs
+backport-harness --config config.yaml inspect --pr 12345
+backport-harness --config config.yaml analyze --dry-run --limit 3
+backport-harness --config config.yaml analyze --pr 12345
+backport-harness --config config.yaml recover-stale
+backport-harness --config config.yaml retry --status NEEDS_RETRY --limit 3
+backport-harness --config config.yaml report
 ```
 
 Expected result:
 
 - SQLite contains scanned PRs.
 - One PR is analyzed by Codex.
-- `backport-candidates.md`, `inconclusive.md`, and `discarded.jsonl` are generated.
+- Valid decisions, evidence, test runs, and queue status are stored.
+- `backport-candidates.md`, `inconclusive.md`, `discarded.jsonl`, and
+  `full-audit.jsonl` are generated under `reports.output_dir`.
 
 ---
 
 ## 27. Important implementation notes
 
-### Do not over-optimize scanner checkpointing in MVP
+### Do not over-optimize scanner checkpointing in 0.1
 
 Because scanning is idempotent and cheaper than Codex, it is acceptable to rerun scans from the same date range.
 
 Add true pagination checkpoints later if needed.
 
-### Do not require test transplantation in MVP
+### Do not require test transplantation for every result
 
-Test transplantation is valuable but brittle. The first useful system should classify and prioritize candidates.
+Test transplantation is valuable but brittle. The system should preserve
+validated test evidence when Codex can produce it, while still allowing
+classification and prioritization from code evidence when tests are not
+available.
 
 ### Prefer `INCONCLUSIVE` over unsafe discard
 

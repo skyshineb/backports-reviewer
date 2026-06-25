@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
+from importlib import resources
 
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+PROMPTS_PACKAGE = "backport_harness.prompts"
 ANALYZE_TARGET_BRANCH_PROMPT = "analyze_target_branch_pr.md"
 ANALYZE_SOURCE_BRANCH_PROMPT = "analyze_source_branch_pr.md"
 TRANSPLANT_TEST_PROMPT = "transplant_test.md"
@@ -11,8 +11,7 @@ VERIFY_FIX_PROMPT = "verify_fix.md"
 
 
 def load_prompt_template(name: str) -> str:
-    path = PROMPTS_DIR / name
-    return path.read_text(encoding="utf-8")
+    return resources.files(PROMPTS_PACKAGE).joinpath(name).read_text(encoding="utf-8")
 
 
 def analysis_prompt_for_branch(

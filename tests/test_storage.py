@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -73,57 +72,41 @@ def test_init_database_can_be_rerun_safely(tmp_path: Path) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
 
-    assert rows == [
-        ("001_initial.sql",),
-        ("002_evidence_patch_path.sql",),
-        ("003_generic_contract.sql",),
-    ]
+    assert rows == [("001_initial.sql",)]
 
 
-def test_init_database_migrates_generic_contract_from_existing_database(
-    tmp_path: Path,
-) -> None:
+def test_init_database_rejects_pre_0_1_schema(tmp_path: Path) -> None:
     sqlite_path = tmp_path / "backport_harness.sqlite3"
-    _create_database_at_migration_002(sqlite_path)
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 
     with connect(sqlite_path) as connection:
-        pr_id = _insert_legacy_pr(connection)
-        analysis_run_id = _insert_legacy_analysis_run(connection, pr_id=pr_id)
-        _insert_legacy_decisions(
-            connection,
-            pr_id=pr_id,
-            analysis_run_id=analysis_run_id,
+        connection.executescript(
+            """
+            CREATE TABLE schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            INSERT INTO schema_migrations(version, applied_at)
+            VALUES ('001_initial.sql', '2024-01-01T00:00:00Z');
+
+            CREATE TABLE prs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                github_pr_number INTEGER NOT NULL,
+                target_branch TEXT NOT NULL
+            );
+            CREATE TABLE decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                applies_to_oss_015 INTEGER
+            );
+            CREATE TABLE evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_path TEXT
+            );
+            """
         )
 
-    init_database(sqlite_path)
-
-    with connect(sqlite_path) as connection:
-        pr_columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(prs)").fetchall()
-        }
-        decision_columns = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(decisions)").fetchall()
-        }
-        upstream_branch = connection.execute(
-            "SELECT upstream_branch FROM prs WHERE github_pr_number = 12345"
-        ).fetchone()[0]
-        decisions = connection.execute(
-            "SELECT decision, applies_to_target_ref FROM decisions ORDER BY id"
-        ).fetchall()
-
-    assert "upstream_branch" in pr_columns
-    assert "target_branch" not in pr_columns
-    assert "applies_to_target_ref" in decision_columns
-    assert "applies_to_oss_015" not in decision_columns
-    assert upstream_branch == "master"
-    assert decisions == [
-        ("TARGET_BRANCH_BUGFIX", 1),
-        ("SOURCE_NOT_APPLICABLE", 0),
-        ("SOURCE_POSSIBLY_APPLICABLE", 1),
-        ("SOURCE_REPRODUCED_ON_TARGET", 1),
-        ("SOURCE_FIX_VERIFIED_ON_TARGET", 1),
-    ]
+    with pytest.raises(RuntimeError, match="not compatible with release 0.1"):
+        init_database(sqlite_path)
 
 
 def test_connect_enables_foreign_keys(tmp_path: Path) -> None:
@@ -1820,123 +1803,6 @@ def _valid_codex_result(*, decision: str = "SOURCE_FIX_VERIFIED_ON_TARGET"):
         """
         % decision
     )
-
-
-def _create_database_at_migration_002(sqlite_path: Path) -> None:
-    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-    with connect(sqlite_path) as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                applied_at TEXT NOT NULL
-            )
-            """
-        )
-        for migration_name in ("001_initial.sql", "002_evidence_patch_path.sql"):
-            connection.executescript(_migration_sql(migration_name))
-            connection.execute(
-                """
-                INSERT INTO schema_migrations(version, applied_at)
-                VALUES (?, ?)
-                """,
-                (migration_name, "2024-01-01T00:00:00Z"),
-            )
-
-
-def _migration_sql(migration_name: str) -> str:
-    return (
-        resources.files("backport_harness.migrations")
-        .joinpath(migration_name)
-        .read_text(encoding="utf-8")
-    )
-
-
-def _insert_legacy_pr(connection) -> int:
-    cursor = connection.execute(
-        """
-        INSERT INTO prs(
-            github_pr_number,
-            github_pr_url,
-            title,
-            target_branch,
-            merged_at,
-            created_in_db_at,
-            updated_in_db_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            12345,
-            "https://github.com/apache/hudi/pull/12345",
-            "Fix legacy behavior",
-            "master",
-            "2024-01-01T00:00:00Z",
-            "2024-01-01T00:00:00Z",
-            "2024-01-01T00:00:00Z",
-        ),
-    )
-    return int(cursor.lastrowid)
-
-
-def _insert_legacy_analysis_run(connection, *, pr_id: int) -> int:
-    cursor = connection.execute(
-        """
-        INSERT INTO analysis_runs(
-            pr_id,
-            run_id,
-            started_at,
-            finished_at,
-            codex_exit_code,
-            status,
-            task_dir
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            pr_id,
-            "legacy-run",
-            "2024-01-01T00:00:00Z",
-            "2024-01-01T00:10:00Z",
-            0,
-            "DONE",
-            "workspace/tasks/pr-12345",
-        ),
-    )
-    return int(cursor.lastrowid)
-
-
-def _insert_legacy_decisions(connection, *, pr_id: int, analysis_run_id: int) -> None:
-    for decision, applies_to_target in (
-        ("DIRECT_015_BUGFIX", 1),
-        ("MASTER_NOT_APPLICABLE", 0),
-        ("MASTER_POSSIBLY_APPLICABLE", 1),
-        ("MASTER_REPRODUCED_ON_015", 1),
-        ("MASTER_FIX_VERIFIED_ON_015", 1),
-    ):
-        connection.execute(
-            """
-            INSERT INTO decisions(
-                pr_id,
-                analysis_run_id,
-                decision,
-                confidence,
-                applies_to_oss_015,
-                reason,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                pr_id,
-                analysis_run_id,
-                decision,
-                "high",
-                applies_to_target,
-                "legacy reason",
-                "2024-01-01T00:00:00Z",
-            ),
-        )
 
 
 def _insert_saved_pr(

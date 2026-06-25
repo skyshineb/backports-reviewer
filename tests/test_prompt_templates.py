@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 
-PROMPTS_DIR = Path("prompts")
+PROMPTS_DIR = Path("backport_harness/prompts")
 PROMPT_FILES = [
     "analyze_target_branch_pr.md",
     "analyze_source_branch_pr.md",

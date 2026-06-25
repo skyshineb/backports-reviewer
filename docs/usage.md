@@ -33,7 +33,11 @@ Initialize the SQLite database:
 .venv/bin/backport-harness --config config.yaml db init
 ```
 
-The default `config.yaml` stores state under `workspace/lance-v7/`, writes reports under `reports/lance-v7/`, uses public Lance upstream settings, sets the public target ref to tag `v7.0.0`, sets the default Codex and stale-run timeout to 7200 seconds, and runs Codex with `medium` reasoning effort. `config.hudi.yaml` is available as the Apache Hudi `master`/`0.15` example.
+The root `config.yaml` is an editable generic template. It stores state under `workspace/default/`, writes reports under `reports/default/`, sets the default Codex and stale-run timeout to 7200 seconds, and runs Codex with `medium` reasoning effort. Concrete examples are available in `examples/config.lance-v7.yaml` and `examples/config.hudi.yaml`.
+
+Release 0.1 treats the SQLite schema as the first public baseline. If `db init`
+reports an incompatible schema, point `storage.sqlite_path` at a fresh database
+or recreate the file from public source data.
 
 ## Configuration
 
@@ -61,7 +65,7 @@ Scan PRs by inclusive `merged_at` date range:
 ```sh
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01
 .venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31
-.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch master
+.venv/bin/backport-harness --config config.yaml scan --from-date 2024-01-01 --to-date 2024-01-31 --branch main
 ```
 
 If `--branch` is omitted, every branch listed in `github.branches` is scanned. The scanner is intentionally slow: it delays between requests and pages, respects rate-limit headers, backs off on transient failures, and records scan audit rows.
@@ -74,7 +78,7 @@ List saved PRs:
 
 ```sh
 .venv/bin/backport-harness --config config.yaml list-prs
-.venv/bin/backport-harness --config config.yaml list-prs --branch master
+.venv/bin/backport-harness --config config.yaml list-prs --branch main
 .venv/bin/backport-harness --config config.yaml list-prs --status QUEUED_FOR_ANALYSIS
 .venv/bin/backport-harness --config config.yaml list-prs --from-date 2024-01-01 --to-date 2024-01-31 --limit 50
 .venv/bin/backport-harness --config config.yaml list-prs --order-by priority

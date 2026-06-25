@@ -13,8 +13,8 @@ upstream repository, public upstream branches, and a public target ref such as a
 release branch or tag. It produces a human review queue for engineers who will
 manually check and backport relevant fixes elsewhere.
 
-The default `config.yaml` is the public Lance `main` to `v7.0.0` example.
-`config.hudi.yaml` keeps the older Apache Hudi `master` to `0.15` example.
+The root `config.yaml` is an editable generic template. Repository-specific
+examples live under `examples/`.
 
 ## 2. Core idea
 
@@ -253,7 +253,7 @@ Responsibilities:
 For each PR, the harness creates a task bundle:
 
 ```text
-workspace/tasks/pr-12345/
+workspace/default/tasks/pr-12345/
   pr.json
   files_changed.json
   pr.diff
@@ -265,6 +265,10 @@ workspace/tasks/pr-12345/
     logs/
     patches/
 ```
+
+By default, task bundles are written under the directory containing the
+configured SQLite database. Operators may override the root with
+`security.task_dir`.
 
 This bundle is the only context Codex should need.
 
@@ -863,23 +867,18 @@ backport-harness/
       report.py
       review.py
 
-  prompts/
-    analyze_target_branch_pr.md
-    analyze_source_branch_pr.md
-    transplant_test.md
-    verify_fix.md
+    prompts/
+      analyze_target_branch_pr.md
+      analyze_source_branch_pr.md
+      transplant_test.md
+      verify_fix.md
 
-  reports/
-    backport-candidates.md
-    inconclusive.md
-    discarded.jsonl
-    full-audit.jsonl
+  examples/
+    config.lance-v7.yaml
+    config.hudi.yaml
 
-  workspace/
-    upstream/
-    worktrees/
-    tasks/
-    runs/
+  reports/   # generated, ignored by Git
+  workspace/ # generated, ignored by Git
 
   tests/
     test_state_machine.py
@@ -890,7 +889,7 @@ backport-harness/
 
 ---
 
-## 16. MVP scope
+## 16. Release 0.1 Scope
 
 The first useful version should include:
 

@@ -9,7 +9,8 @@ This repository is developed task by task. Agents must follow these rules before
 3. Check the task specification against the project documentation before coding:
    - `docs/backport_harness_design.md`
    - `docs/backport_harness_implementation_steps.md`
-   - any relevant existing task files in `docs/tasks/`
+   - any relevant active task files in `docs/tasks/`
+   - any relevant archived task files in `docs/archive/tasks/`
 4. Resolve conflicts or contradictions between the task and documentation before implementation.
 5. Implement only the scope described by the task file.
 6. Run the relevant tests and checks before considering the task complete.
@@ -18,6 +19,8 @@ This repository is developed task by task. Agents must follow these rules before
 ## Task Files
 
 - Task files live in `docs/tasks/`.
+- Completed task files may be moved to `docs/archive/tasks/` after their work
+  has landed.
 - Use numeric prefixes to preserve ordering, for example:
 
   ```text
