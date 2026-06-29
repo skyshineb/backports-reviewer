@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 
 GITHUB_CREDENTIAL_ENV_VARS = {
@@ -19,6 +20,12 @@ GITHUB_CREDENTIAL_ENV_VARS = {
     "GITHUB_ENTERPRISE_TOKEN",
     "GH_ENTERPRISE_TOKEN",
 }
+
+
+@dataclass(frozen=True)
+class CodexProgressEvent:
+    event: str
+    elapsed_seconds: float
 
 
 @dataclass(frozen=True)
@@ -31,6 +38,8 @@ class CodexRunRequest:
     extra_env: dict[str, str] = field(default_factory=dict)
     github_token_env: str | None = None
     reasoning_effort: str = "medium"
+    progress: Callable[[CodexProgressEvent], None] | None = None
+    heartbeat_interval_seconds: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -47,6 +56,7 @@ class CodexRunResult:
 
 def run_codex(request: CodexRunRequest) -> CodexRunResult:
     started_at = _utc_now()
+    started_monotonic = time.monotonic()
     output_dir = request.output_result_path.parent
     logs_dir = output_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -79,12 +89,46 @@ def run_codex(request: CodexRunRequest) -> CodexRunResult:
         )
 
         timed_out = False
-        try:
-            stdout, stderr = process.communicate(timeout=request.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _terminate_process_group(process)
-            stdout, stderr = process.communicate()
+        deadline = started_monotonic + request.timeout_seconds
+        last_heartbeat = started_monotonic
+        stdout = ""
+        stderr = ""
+        while True:
+            now = time.monotonic()
+            remaining = deadline - now
+            if remaining <= 0:
+                timed_out = True
+                _terminate_process_group(process)
+                stdout, stderr = process.communicate()
+                break
+
+            wait_timeout = remaining
+            if request.progress is not None and request.heartbeat_interval_seconds > 0:
+                wait_timeout = min(wait_timeout, request.heartbeat_interval_seconds)
+
+            try:
+                stdout, stderr = process.communicate(timeout=wait_timeout)
+                break
+            except subprocess.TimeoutExpired:
+                now = time.monotonic()
+                if wait_timeout >= remaining or now >= deadline:
+                    timed_out = True
+                    _terminate_process_group(process)
+                    stdout, stderr = process.communicate()
+                    break
+                if (
+                    request.progress is not None
+                    and request.heartbeat_interval_seconds > 0
+                    and now - last_heartbeat >= request.heartbeat_interval_seconds
+                ):
+                    request.progress(
+                        CodexProgressEvent(
+                            event="heartbeat",
+                            elapsed_seconds=now - started_monotonic,
+                        )
+                    )
+                    last_heartbeat = now
+                continue
 
         stdout_log_path.write_text(stdout or "", encoding="utf-8")
         stderr_log_path.write_text(stderr or "", encoding="utf-8")

@@ -136,10 +136,12 @@ Preview and run analysis:
 ```
 
 `analyze --limit N` takes a candidate snapshot at command start and processes up
-to `N` queued PRs sequentially in priority order. It prints a terminal batch
-summary with processed PRs, failures, skipped items, final queue statuses,
-elapsed time, and the stop reason. By default the batch continues after a
-PR-level failure; `--fail-fast` stops after the first failure.
+to `N` queued PRs sequentially in priority order. It prints progress lines to
+stderr as candidates are selected, each PR starts, Codex starts, Codex remains
+running, Codex finishes, and each PR completes or fails. It then prints a
+terminal batch summary with processed PRs, failures, skipped items, final queue
+statuses, elapsed time, and the stop reason. By default the batch continues
+after a PR-level failure; `--fail-fast` stops after the first failure.
 
 `--max-runtime-minutes` is checked only between PRs. It does not stop an
 in-flight Codex run; per-PR timeouts still come from `codex.timeout_seconds`.
@@ -149,7 +151,9 @@ the task bundle, locks the queue row, invokes Codex, captures stdout and stderr,
 validates `output/codex_result.json`, stores valid decisions and evidence, and
 preserves task output for inspection. Timeouts, non-zero exits, malformed JSON,
 and invalid evidence mark the queue retryable until the configured attempt
-limit is reached.
+limit is reached. Codex stdout and stderr are not streamed to the terminal; they
+remain in each task's `output/logs/codex-stdout.log` and
+`output/logs/codex-stderr.log`.
 
 Recover stale runs and retry selected failures:
 

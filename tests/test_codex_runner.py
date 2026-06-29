@@ -127,6 +127,50 @@ def test_run_codex_timeout_signals_process_group(tmp_path: Path, monkeypatch) ->
     assert signals
 
 
+def test_run_codex_emits_heartbeat_without_streaming_logs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    events = []
+    monotonic_values = iter([0.0, 0.0, 60.0, 60.0, 120.0, 120.0])
+
+    class HeartbeatProcess:
+        pid = 123
+        returncode = 0
+
+        def __init__(self) -> None:
+            self.communicate_calls = 0
+
+        def communicate(self, timeout=None):
+            self.communicate_calls += 1
+            if self.communicate_calls <= 2:
+                raise subprocess.TimeoutExpired(cmd="codex", timeout=timeout)
+            return "stdout\n", "stderr\n"
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: HeartbeatProcess())
+    monkeypatch.setattr("time.monotonic", lambda: next(monotonic_values))
+
+    result = run_codex(
+        CodexRunRequest(
+            prompt="do work",
+            cwd=tmp_path,
+            timeout_seconds=180,
+            output_result_path=tmp_path / "output" / "codex_result.json",
+            progress=events.append,
+            heartbeat_interval_seconds=60,
+        )
+    )
+
+    assert result.timed_out is False
+    assert [event.event for event in events] == ["heartbeat", "heartbeat"]
+    assert [event.elapsed_seconds for event in events] == [60.0, 120.0]
+    assert result.stdout_log_path.read_text(encoding="utf-8") == "stdout\n"
+    assert result.stderr_log_path.read_text(encoding="utf-8") == "stderr\n"
+
+
 def test_run_codex_strips_blocked_credentials_from_extra_env(
     tmp_path: Path,
     monkeypatch,

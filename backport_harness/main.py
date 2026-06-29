@@ -8,6 +8,7 @@ import typer
 from backport_harness import __version__
 from backport_harness.analysis_runner import analyze_one_pr, analyze_pr_batch
 from backport_harness.commands.analyze import (
+    make_analysis_progress_renderer,
     render_analyze_batch_summary,
     render_analyze_dry_run,
 )
@@ -236,8 +237,9 @@ def analyze(
 
     if pr is not None:
         config = _require_config(ctx)
+        progress = make_analysis_progress_renderer()
         try:
-            result = analyze_one_pr(config=config, pr_number=pr)
+            result = analyze_one_pr(config=config, pr_number=pr, progress=progress)
         except (RuntimeError, ValueError) as error:
             raise typer.BadParameter(str(error)) from error
 
@@ -261,12 +263,14 @@ def analyze(
         raise typer.BadParameter("Use --limit for batch analysis, --dry-run, or --pr.")
 
     config = _require_config(ctx)
+    progress = make_analysis_progress_renderer()
     try:
         batch_result = analyze_pr_batch(
             config=config,
             limit=resolved_limit,
             max_runtime_minutes=max_runtime_minutes,
             fail_fast=fail_fast,
+            progress=progress,
         )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error

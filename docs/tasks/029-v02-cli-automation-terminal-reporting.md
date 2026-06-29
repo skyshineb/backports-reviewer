@@ -29,6 +29,10 @@ regenerable from SQLite.
   retryable PR within the same command.
 - Preserve existing per-PR atomic state transitions and Codex result validation.
 - Handle `Ctrl-C` as a graceful stop request between PRs where possible.
+- Print intermediate progress lines during `analyze --limit N` and
+  `analyze --pr N` so long foreground Codex runs do not appear hung.
+- Keep Codex stdout and stderr captured in task log files instead of streaming
+  Codex output to the terminal.
 - Print a Rich terminal batch summary with processed PRs, final queue statuses,
   failures, skipped items, elapsed time, and stop reason.
 - Extend `backport-harness report` with terminal views:
@@ -64,6 +68,13 @@ regenerable from SQLite.
 - With `--fail-fast`, the batch stops after the first PR-level failure.
 - Retryable failures produced during a batch are not selected again by that same
   command.
+- `analyze --limit 5` prints stable progress lines when candidates are selected,
+  each PR starts, Codex starts, Codex is still running, Codex finishes, and each
+  PR completes or fails.
+- `analyze --pr 12345` prints the same per-PR progress lines for the explicit
+  single-PR path.
+- Codex stdout and stderr are not mirrored to the terminal; they remain captured
+  under the task `output/logs/` directory.
 - Terminal batch summary clearly reports completed work, failures, skipped PRs,
   elapsed time, and why the batch stopped.
 - Terminal report views read from SQLite and can be printed without writing
@@ -94,6 +105,8 @@ regenerable from SQLite.
   - `analyze --dry-run --limit`
   - invalid analyze option combinations
   - batch terminal summary output
+  - intermediate progress output
+- Add runner tests for progress event ordering and Codex heartbeat callbacks.
 - Add report-view tests using recorded Rich console output for:
   - summary
   - filters
