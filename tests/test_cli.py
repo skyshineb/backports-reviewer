@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from backport_harness import __version__
+from backport_harness.analysis_runner import AnalyzeBatchItemResult, AnalyzeBatchResult
 from backport_harness.main import app
 from backport_harness.storage import connect, init_database
 from backport_harness.task_builder import TaskBundle
@@ -417,6 +418,88 @@ def test_report_writes_configured_report_directory_for_missing_database(
     assert "Generated reports" in result.output
 
 
+def test_report_summary_view_reads_sqlite_without_writing_files(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, with_analysis=True, status="DONE")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "report",
+            "--view",
+            "summary",
+            "--no-files",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Report Summary" in result.output
+    assert "discarded" in result.output
+    assert "Generated reports" not in result.output
+    assert not (tmp_path / "reports" / "full-audit.jsonl").exists()
+
+
+def test_report_view_filters_and_details(
+    tmp_path: Path,
+) -> None:
+    sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path, sqlite_path)
+    init_database(sqlite_path)
+    _insert_saved_pr(sqlite_path, with_analysis=True, status="DONE")
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "report",
+            "--view",
+            "discarded",
+            "--decision",
+            "SOURCE_NOT_APPLICABLE",
+            "--queue-status",
+            "DONE",
+            "--review-status",
+            "accepted_for_backport",
+            "--details",
+            "--no-files",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Report Discarded" in result.output
+    assert "#12345" in result.output
+    assert "SOURCE_NOT_APPLICABLE" in result.output
+    assert "Affected file is absent on 0.15" in result.output
+    assert "No action required" in result.output
+
+
+def test_report_view_rejects_no_files_without_view(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "report",
+            "--no-files",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--no-files requires --view" in result.output
+
+
 def test_review_records_status_and_comment_for_saved_pr(tmp_path: Path) -> None:
     sqlite_path = tmp_path / "workspace" / "backport_harness.sqlite3"
     config_path = tmp_path / "config.yaml"
@@ -624,7 +707,81 @@ def test_analyze_without_dry_run_fails(tmp_path: Path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "Use --dry-run or --pr" in result.output
+    assert "Use --limit for batch analysis" in result.output
+
+
+def test_analyze_limit_invokes_batch_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+    calls = []
+
+    def fake_analyze_pr_batch(**kwargs):
+        calls.append(kwargs)
+        return AnalyzeBatchResult(
+            selected_count=2,
+            processed_count=2,
+            succeeded_count=1,
+            failed_count=1,
+            skipped_count=0,
+            elapsed_seconds=12.5,
+            stop_reason="selected candidates exhausted",
+            items=[
+                AnalyzeBatchItemResult(
+                    pr_number=12345,
+                    title="Fix compaction bug",
+                    upstream_branch="master",
+                    initial_queue_status="QUEUED_FOR_ANALYSIS",
+                    final_queue_status="REPORTABLE",
+                    outcome="succeeded",
+                    run_id="run-1",
+                    codex_exit_code=0,
+                    timed_out=False,
+                    error=None,
+                    skip_reason=None,
+                ),
+                AnalyzeBatchItemResult(
+                    pr_number=12346,
+                    title="Infra failure",
+                    upstream_branch="master",
+                    initial_queue_status="QUEUED_FOR_ANALYSIS",
+                    final_queue_status="NEEDS_RETRY",
+                    outcome="failed",
+                    run_id="run-2",
+                    codex_exit_code=1,
+                    timed_out=False,
+                    error="Codex exited with 1.",
+                    skip_reason=None,
+                ),
+            ],
+        )
+
+    monkeypatch.setattr("backport_harness.main.analyze_pr_batch", fake_analyze_pr_batch)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "analyze",
+            "--limit",
+            "2",
+            "--max-runtime-minutes",
+            "30",
+            "--fail-fast",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["limit"] == 2
+    assert calls[0]["max_runtime_minutes"] == 30.0
+    assert calls[0]["fail_fast"] is True
+    assert "Analysis Batch Summary" in result.output
+    assert "Selected PRs" in result.output
+    assert "#12345" in result.output
+    assert "NEEDS_RETRY" in result.output
 
 
 def test_analyze_pr_invokes_runner(
@@ -701,6 +858,46 @@ def test_analyze_pr_cannot_be_combined_with_dry_run(tmp_path: Path) -> None:
     assert "cannot be combined" in result.output
 
 
+def test_analyze_pr_cannot_be_combined_with_limit(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "analyze",
+            "--pr",
+            "12345",
+            "--limit",
+            "1",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--pr cannot be combined with --limit" in result.output
+
+
+def test_analyze_dry_run_rejects_batch_runtime_options(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "analyze",
+            "--dry-run",
+            "--fail-fast",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--dry-run cannot be combined with --fail-fast" in result.output
+
+
 def test_analyze_rejects_invalid_limit(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     write_valid_config(config_path)
@@ -719,6 +916,27 @@ def test_analyze_rejects_invalid_limit(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "positive integer" in result.output
+
+
+def test_analyze_rejects_invalid_max_runtime(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_valid_config(config_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_path),
+            "analyze",
+            "--limit",
+            "1",
+            "--max-runtime-minutes",
+            "0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "max-runtime-minutes must be positive" in result.output
 
 
 def test_recover_stale_reports_missing_database(tmp_path: Path) -> None:

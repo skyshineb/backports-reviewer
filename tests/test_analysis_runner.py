@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from backport_harness.analysis_runner import analyze_one_pr
+from backport_harness.analysis_runner import (
+    AnalyzeOneResult,
+    analyze_one_pr,
+    analyze_pr_batch,
+)
 from backport_harness.codex_runner import CodexRunResult
 from backport_harness.storage import connect, init_database
 from backport_harness.task_builder import TaskBundle
@@ -252,6 +256,167 @@ def test_analyze_one_pr_invalid_result_at_max_attempts_marks_failed_infra(
     assert queue_status == "FAILED_INFRA"
 
 
+def test_analyze_pr_batch_uses_candidate_snapshot_order_and_limit(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    init_database(config.storage.sqlite_path)
+    calls = []
+
+    with connect(config.storage.sqlite_path) as connection:
+        _insert_batch_pr(
+            connection,
+            number=1,
+            title="Later medium priority",
+            priority=50,
+            merged_at="2024-01-03T00:00:00Z",
+        )
+        _insert_batch_pr(
+            connection,
+            number=2,
+            title="High priority",
+            priority=10,
+            merged_at="2024-01-05T00:00:00Z",
+        )
+        _insert_batch_pr(
+            connection,
+            number=3,
+            title="Earlier medium priority",
+            priority=50,
+            merged_at="2024-01-01T00:00:00Z",
+        )
+
+    def fake_analyze_one(**kwargs):
+        pr_number = kwargs["pr_number"]
+        calls.append(pr_number)
+        _set_queue_status(config.storage.sqlite_path, pr_number, "REPORTABLE")
+        return _batch_success(pr_number)
+
+    result = analyze_pr_batch(config=config, limit=2, analyze_one=fake_analyze_one)
+
+    assert calls == [2, 3]
+    assert result.selected_count == 2
+    assert result.processed_count == 2
+    assert result.succeeded_count == 2
+    assert [item.pr_number for item in result.items] == [2, 3]
+
+
+def test_analyze_pr_batch_stops_before_next_pr_at_runtime_cap(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    init_database(config.storage.sqlite_path)
+    calls = []
+    clock_values = iter([0.0, 0.0, 61.0, 61.0])
+
+    with connect(config.storage.sqlite_path) as connection:
+        _insert_batch_pr(connection, number=1, title="First")
+        _insert_batch_pr(connection, number=2, title="Second")
+
+    def fake_analyze_one(**kwargs):
+        pr_number = kwargs["pr_number"]
+        calls.append(pr_number)
+        _set_queue_status(config.storage.sqlite_path, pr_number, "REPORTABLE")
+        return _batch_success(pr_number)
+
+    result = analyze_pr_batch(
+        config=config,
+        limit=2,
+        max_runtime_minutes=1,
+        analyze_one=fake_analyze_one,
+        clock=lambda: next(clock_values),
+    )
+
+    assert calls == [1]
+    assert result.processed_count == 1
+    assert result.skipped_count == 1
+    assert result.stop_reason == "max runtime reached"
+    assert result.items[1].outcome == "skipped"
+
+
+def test_analyze_pr_batch_continues_after_default_failure(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    init_database(config.storage.sqlite_path)
+    calls = []
+
+    with connect(config.storage.sqlite_path) as connection:
+        _insert_batch_pr(connection, number=1, title="Fails")
+        _insert_batch_pr(connection, number=2, title="Succeeds")
+
+    def fake_analyze_one(**kwargs):
+        pr_number = kwargs["pr_number"]
+        calls.append(pr_number)
+        if pr_number == 1:
+            _set_queue_status(config.storage.sqlite_path, pr_number, "NEEDS_RETRY")
+            raise RuntimeError("temporary failure")
+        _set_queue_status(config.storage.sqlite_path, pr_number, "REPORTABLE")
+        return _batch_success(pr_number)
+
+    result = analyze_pr_batch(config=config, limit=2, analyze_one=fake_analyze_one)
+
+    assert calls == [1, 2]
+    assert result.failed_count == 1
+    assert result.succeeded_count == 1
+    assert result.skipped_count == 0
+
+
+def test_analyze_pr_batch_fail_fast_skips_remaining_candidates(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    init_database(config.storage.sqlite_path)
+    calls = []
+
+    with connect(config.storage.sqlite_path) as connection:
+        _insert_batch_pr(connection, number=1, title="Fails")
+        _insert_batch_pr(connection, number=2, title="Skipped")
+
+    def fake_analyze_one(**kwargs):
+        pr_number = kwargs["pr_number"]
+        calls.append(pr_number)
+        _set_queue_status(config.storage.sqlite_path, pr_number, "NEEDS_RETRY")
+        raise RuntimeError("stop here")
+
+    result = analyze_pr_batch(
+        config=config,
+        limit=2,
+        fail_fast=True,
+        analyze_one=fake_analyze_one,
+    )
+
+    assert calls == [1]
+    assert result.failed_count == 1
+    assert result.skipped_count == 1
+    assert result.stop_reason == "fail-fast after PR #1"
+    assert result.items[1].skip_reason == "not started because fail-fast stopped the batch"
+
+
+def test_analyze_pr_batch_does_not_reselect_retryable_failure_in_same_command(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    init_database(config.storage.sqlite_path)
+    calls = []
+
+    with connect(config.storage.sqlite_path) as connection:
+        _insert_batch_pr(connection, number=1, title="Retryable failure")
+
+    def fake_analyze_one(**kwargs):
+        pr_number = kwargs["pr_number"]
+        calls.append(pr_number)
+        _set_queue_status(config.storage.sqlite_path, pr_number, "NEEDS_RETRY")
+        raise RuntimeError("retry later")
+
+    result = analyze_pr_batch(config=config, limit=5, analyze_one=fake_analyze_one)
+
+    assert calls == [1]
+    assert result.selected_count == 1
+    assert result.failed_count == 1
+    assert result.items[0].final_queue_status == "NEEDS_RETRY"
+
+
 def _insert_saved_pr(connection, *, status: str) -> int:
     cursor = connection.execute(
         """
@@ -301,6 +466,102 @@ def _insert_saved_pr(connection, *, status: str) -> int:
         ),
     )
     return pr_id
+
+
+def _insert_batch_pr(
+    connection,
+    *,
+    number: int,
+    title: str,
+    priority: int = 20,
+    merged_at: str = "2024-01-01T00:00:00Z",
+    status: str = "QUEUED_FOR_ANALYSIS",
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO prs(
+            github_pr_number,
+            github_pr_url,
+            title,
+            upstream_branch,
+            merged_commit_sha,
+            merged_at,
+            created_in_db_at,
+            updated_in_db_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            number,
+            f"https://github.com/apache/hudi/pull/{number}",
+            title,
+            "master",
+            f"abc{number}",
+            merged_at,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        ),
+    )
+    pr_id = int(cursor.lastrowid)
+    connection.execute(
+        """
+        INSERT INTO analysis_queue(
+            pr_id,
+            status,
+            priority,
+            attempts,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            status,
+            priority,
+            0,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        ),
+    )
+    return pr_id
+
+
+def _set_queue_status(sqlite_path: Path, pr_number: int, status: str) -> None:
+    with connect(sqlite_path) as connection:
+        connection.execute(
+            """
+            UPDATE analysis_queue
+            SET status = ?, updated_at = ?
+            WHERE pr_id = (
+                SELECT id
+                FROM prs
+                WHERE github_pr_number = ?
+                ORDER BY upstream_branch ASC
+                LIMIT 1
+            )
+            """,
+            (status, "2024-01-01T00:01:00Z", pr_number),
+        )
+
+
+def _batch_success(pr_number: int) -> AnalyzeOneResult:
+    return AnalyzeOneResult(
+        pr_number=pr_number,
+        run_id=f"run-{pr_number}",
+        task_dir=f"workspace/tasks/pr-{pr_number}",
+        codex_result=CodexRunResult(
+            session_id=f"session-{pr_number}",
+            exit_code=0,
+            timed_out=False,
+            stdout_log_path=Path(f"workspace/tasks/pr-{pr_number}/stdout.log"),
+            stderr_log_path=Path(f"workspace/tasks/pr-{pr_number}/stderr.log"),
+            last_message_path=None,
+            started_at="2024-01-01T00:00:00Z",
+            finished_at="2024-01-01T00:01:00Z",
+        ),
+        validation=None,
+    )
 
 
 def _make_bundle(tmp_path: Path) -> tuple[Path, TaskBundle]:
