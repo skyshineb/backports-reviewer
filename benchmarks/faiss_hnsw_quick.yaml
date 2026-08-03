@@ -1,0 +1,11 @@
+metric: cosine
+k: [10]
+m: [32]
+ef_construction: [200]
+ef_search: [16, 32, 64, 128, 256]
+threads: [1]
+query_batch_size: 100
+latency_repetitions: 3
+warmup_batches: 2
+ground_truth_batch_size: 100
+mode: warm

@@ -1,0 +1,4 @@
+faiss-cpu>=1.8.0
+numpy>=1.26
+psutil>=5.9
+pyyaml>=6.0
