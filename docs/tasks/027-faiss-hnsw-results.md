@@ -26,7 +26,7 @@ observed results.
 ## Affected Modules or Commands
 
 - `benchmark_faiss_hnsw.py`
-- `benchmarks/faiss_hnsw_results_2026-08-03.md`
+- `benchm/faiss_hnsw_results_2026-08-03.md`
 
 ## Test Plan
 
