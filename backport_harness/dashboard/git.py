@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
 
-from backport_harness.dashboard.models import ProfileSettings, ScanBatch, SourceCommit
+from backport_harness.dashboard.models import PreparedPatch, ProfileSettings, ScanBatch, SourceCommit
 
 
 class GitError(RuntimeError):
@@ -18,6 +18,13 @@ class GitError(RuntimeError):
 
 class UpstreamRewrite(GitError):
     pass
+
+
+class StalePatch(GitError):
+    pass
+
+
+OPERATIONS_REF = "refs/backports-reviewer"
 
 
 def git(
@@ -87,6 +94,7 @@ class GitWorkspace:
         self.fork_roots = [path.resolve() for path in fork_roots]
         self.upstream_url = upstream_url
         self._init_lock = threading.Lock()
+        self._fork_fetch_lock = threading.Lock()
 
     def _allow(self, path: Path) -> None:
         if not any(path.is_relative_to(root) for root in self.fork_roots):
@@ -182,13 +190,14 @@ class GitWorkspace:
         fork = self.fork(settings.fork_path)
         mirror = self.mirror(profile_id)
         ref = branch_ref(settings.target_branch)
-        git(
-            mirror, "fetch", "--no-tags", "--no-write-fetch-head",
-            "--no-auto-maintenance", "--no-recurse-submodules",
-            str(fork), f"+{ref}:refs/backports-reviewer/fork",
-            local_transport=True,
-        )
-        return resolve_commit(mirror, "refs/backports-reviewer/fork")
+        with self._fork_fetch_lock:
+            git(
+                mirror, "fetch", "--no-tags", "--no-write-fetch-head",
+                "--no-auto-maintenance", "--no-recurse-submodules",
+                str(fork), f"+{ref}:refs/backports-reviewer/fork",
+                local_transport=True,
+            )
+            return resolve_commit(mirror, "refs/backports-reviewer/fork")
 
     @contextmanager
     def worktree(self, profile_id: int, sha: str) -> Iterator[Path]:
@@ -204,6 +213,83 @@ class GitWorkspace:
     def probe(self, profile_id: int, target: str, source: str, parent_count: int) -> str:
         with self.worktree(profile_id, target) as tree:
             return cherry_pick(tree, source, parent_count)
+
+    def source_diff(self, profile_id: int, sha: str) -> str:
+        return git(
+            self.mirror(profile_id), "show", "--format=", "--diff-merges=first-parent",
+            "--no-ext-diff", "--no-textconv", "--no-color", "--binary", sha,
+        ).stdout.decode("utf-8", "replace")
+
+    def prepare_pick(
+        self, profile_id: int, target: str, commit: dict, token: str
+    ) -> tuple[str, PreparedPatch | None]:
+        with self.worktree(profile_id, target) as tree:
+            state = cherry_pick(tree, commit["sha"], commit["parent_count"])
+            patch = self._commit_patch(tree, target, commit, token) if state == "applicable" else None
+        return state, patch
+
+    def prepare_adaptation(
+        self, profile_id: int, target: str, commit: dict, token: str, patch: str
+    ) -> PreparedPatch:
+        with self.worktree(profile_id, target) as tree:
+            git(tree, "apply", "--index", "--whitespace=nowarn", "-", data=patch.encode("utf-8"))
+            if not git(tree, "diff", "--cached", "--quiet", allowed=(0, 1)).returncode:
+                raise GitError("The adaptation produced an empty patch.")
+            return self._commit_patch(tree, target, commit, token)
+
+    @staticmethod
+    def _commit_patch(tree: Path, target: str, commit: dict, token: str) -> PreparedPatch:
+        subject = commit["subject"] or "Backport upstream fix"
+        git(
+            tree, "-c", "user.name=Backports Reviewer", "-c",
+            "user.email=backports-reviewer@localhost", "commit", "--no-gpg-sign",
+            "-m", subject, "-m", f"Backport-of: {commit['sha']}",
+        )
+        sha = resolve_commit(tree, "HEAD")
+        diff = git(
+            tree, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary", target, sha,
+        ).stdout.decode("utf-8", "replace")
+        git(tree, "update-ref", f"{OPERATIONS_REF}/drafts/{token}", sha)
+        return PreparedPatch(target, sha, diff)
+
+    def applied_marker(self, settings: ProfileSettings, token: str) -> str | None:
+        fork = self.fork(settings.fork_path)
+        ref = f"{OPERATIONS_REF}/applied/{token}"
+        result = git(fork, "rev-parse", "--verify", "--quiet", ref, allowed=(0, 1))
+        return output(result) if result.returncode == 0 else None
+
+    def promote(self, profile_id: int, settings: ProfileSettings, token: str, patch: PreparedPatch) -> None:
+        fork = self.fork(settings.fork_path)
+        mirror = self.mirror(profile_id)
+        branch = branch_ref(settings.target_branch)
+        marker = f"{OPERATIONS_REF}/applied/{token}"
+        staging = f"{OPERATIONS_REF}/staging/{token}"
+        draft = f"{OPERATIONS_REF}/drafts/{token}"
+        if resolve_commit(mirror, draft) != patch.sha:
+            raise GitError("The prepared Git object no longer matches the recorded patch.")
+        if resolve_commit(fork, branch) != patch.expected_sha:
+            raise StalePatch("The target branch changed. Prepare the patch again.")
+        git(
+            fork, "fetch", "--no-tags", "--no-write-fetch-head", "--no-auto-maintenance",
+            "--no-recurse-submodules", str(mirror), f"{draft}:{staging}", local_transport=True,
+        )
+        try:
+            worktrees = git(fork, "worktree", "list", "--porcelain", "-z").stdout
+            if f"branch {branch}".encode() in worktrees.split(b"\0"):
+                raise GitError("The target branch is checked out. Free it before applying the fix.")
+            transaction = (
+                f"start\nupdate {branch} {patch.sha} {patch.expected_sha}\n"
+                f"create {marker} {patch.sha}\ndelete {staging} {patch.sha}\nprepare\ncommit\n"
+            )
+            try:
+                git(fork, "update-ref", "--no-deref", "--stdin", data=transaction.encode())
+            except GitError as error:
+                if resolve_commit(fork, branch) != patch.expected_sha:
+                    raise StalePatch("The target branch changed. Prepare the patch again.") from error
+                raise
+        finally:
+            # The transaction removes staging on success. This also handles a rejected write.
+            git(fork, "update-ref", "--no-deref", "-d", staging, patch.sha, allowed=(0, 1, 128))
 
 
 def parse_log(raw: bytes) -> list[SourceCommit]:

@@ -1,4 +1,4 @@
-CREATE TABLE dashboard_profiles (
+CREATE TABLE IF NOT EXISTS dashboard_profiles (
     id INTEGER PRIMARY KEY,
     active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
     upstream TEXT NOT NULL,
@@ -18,10 +18,10 @@ CREATE TABLE dashboard_profiles (
     UNIQUE (upstream, upstream_branch, base_ref, fork_path, target_branch)
 );
 
-CREATE UNIQUE INDEX dashboard_active_profile
+CREATE UNIQUE INDEX IF NOT EXISTS dashboard_active_profile
     ON dashboard_profiles(active) WHERE active = 1;
 
-CREATE TABLE dashboard_commits (
+CREATE TABLE IF NOT EXISTS dashboard_commits (
     id INTEGER PRIMARY KEY,
     profile_id INTEGER NOT NULL REFERENCES dashboard_profiles(id),
     sha TEXT NOT NULL,
@@ -40,9 +40,9 @@ CREATE TABLE dashboard_commits (
     UNIQUE (profile_id, sha)
 );
 
-CREATE INDEX dashboard_timeline ON dashboard_commits(profile_id, committed_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS dashboard_timeline ON dashboard_commits(profile_id, committed_at DESC, id DESC);
 
-CREATE TABLE dashboard_jobs (
+CREATE TABLE IF NOT EXISTS dashboard_jobs (
     id INTEGER PRIMARY KEY,
     profile_id INTEGER NOT NULL REFERENCES dashboard_profiles(id),
     commit_id INTEGER REFERENCES dashboard_commits(id),
@@ -64,10 +64,10 @@ CREATE TABLE dashboard_jobs (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX dashboard_job_queue ON dashboard_jobs(profile_id, status, kind, id);
-CREATE INDEX dashboard_commit_jobs ON dashboard_jobs(commit_id, id DESC);
+CREATE INDEX IF NOT EXISTS dashboard_job_queue ON dashboard_jobs(profile_id, status, kind, id);
+CREATE INDEX IF NOT EXISTS dashboard_commit_jobs ON dashboard_jobs(commit_id, id DESC);
 
-CREATE TABLE dashboard_events (
+CREATE TABLE IF NOT EXISTS dashboard_events (
     id INTEGER PRIMARY KEY,
     commit_id INTEGER NOT NULL REFERENCES dashboard_commits(id),
     action TEXT NOT NULL,
