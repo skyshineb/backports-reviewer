@@ -11,7 +11,7 @@ from backport_harness.analysis_runner import (
     analyze_one_pr,
     analyze_pr_batch,
 )
-from backport_harness.codex_runner import CodexRunResult
+from backport_harness.codex_runner import CodexProgressEvent, CodexRunResult
 from backport_harness.storage import connect, init_database
 from backport_harness.task_builder import TaskBundle
 from tests.test_repo_manager import make_config
@@ -189,6 +189,64 @@ def test_analyze_one_pr_stores_successful_validated_codex_result(
     assert test_run_count == 2
 
 
+def test_analyze_one_pr_emits_progress_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    init_database(config.storage.sqlite_path)
+    task_dir, bundle = _make_bundle(tmp_path)
+    _write_valid_codex_result(task_dir)
+    events = []
+
+    with connect(config.storage.sqlite_path) as connection:
+        _insert_saved_pr(connection, status="QUEUED_FOR_ANALYSIS")
+
+    monkeypatch.setattr(
+        "backport_harness.analysis_runner.build_task_bundle",
+        lambda **kwargs: bundle,
+    )
+
+    def capture_codex_request(request):
+        assert request.progress is not None
+        request.progress(CodexProgressEvent(event="heartbeat", elapsed_seconds=60.0))
+        return _successful_codex_run(request)
+
+    monkeypatch.setattr("backport_harness.analysis_runner.run_codex", capture_codex_request)
+
+    analyze_one_pr(
+        config=config,
+        pr_number=12345,
+        progress=events.append,
+        batch_index=1,
+        batch_total=2,
+        title="Fix compaction bug",
+        upstream_branch="master",
+        initial_queue_status="QUEUED_FOR_ANALYSIS",
+    )
+
+    assert [event.event for event in events] == [
+        "pr_start",
+        "run_locked",
+        "bundle_start",
+        "bundle_ready",
+        "codex_start",
+        "codex_heartbeat",
+        "codex_finish",
+        "validation_start",
+        "validation_finish",
+        "pr_finish",
+    ]
+    assert events[0].pr_number == 12345
+    assert events[0].index == 1
+    assert events[0].total == 2
+    assert events[1].attempt == 1
+    assert events[1].max_attempts == 2
+    assert events[5].elapsed_seconds == 60.0
+    assert events[-1].outcome == "succeeded"
+    assert events[-1].final_queue_status == "REPORTABLE"
+
+
 def test_analyze_one_pr_invalid_result_is_retryable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -307,6 +365,7 @@ def test_analyze_pr_batch_stops_before_next_pr_at_runtime_cap(
     config = make_config(tmp_path)
     init_database(config.storage.sqlite_path)
     calls = []
+    events = []
     clock_values = iter([0.0, 0.0, 61.0, 61.0])
 
     with connect(config.storage.sqlite_path) as connection:
@@ -325,6 +384,7 @@ def test_analyze_pr_batch_stops_before_next_pr_at_runtime_cap(
         max_runtime_minutes=1,
         analyze_one=fake_analyze_one,
         clock=lambda: next(clock_values),
+        progress=events.append,
     )
 
     assert calls == [1]
@@ -332,6 +392,11 @@ def test_analyze_pr_batch_stops_before_next_pr_at_runtime_cap(
     assert result.skipped_count == 1
     assert result.stop_reason == "max runtime reached"
     assert result.items[1].outcome == "skipped"
+    assert events[0].event == "batch_selected"
+    assert events[0].total == 2
+    assert events[-1].event == "pr_skipped"
+    assert events[-1].pr_number == 2
+    assert events[-1].skip_reason == "not started because max runtime was reached"
 
 
 def test_analyze_pr_batch_continues_after_default_failure(

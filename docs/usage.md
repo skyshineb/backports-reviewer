@@ -137,7 +137,10 @@ Batch analysis takes a candidate snapshot at command start, then processes up to
 the selected limit sequentially in priority order. The same PR is not reselected
 within the same command even if it becomes retryable. By default, a PR-level
 failure is recorded and the batch continues to the next selected PR. Use
-`--fail-fast` to stop after the first PR-level failure.
+`--fail-fast` to stop after the first PR-level failure. While analysis runs, the
+command prints progress lines to stderr when candidates are selected, each PR
+starts, Codex starts, Codex remains running, Codex finishes, and each PR
+completes or fails.
 
 `--max-runtime-minutes` is checked only before starting the next PR. It never
 kills an in-flight Codex run; per-PR timeouts still come from
@@ -147,8 +150,10 @@ Both batch and one-PR analysis prepare the public task bundle, lock the queue
 row, invoke Codex, capture stdout and stderr, validate
 `output/codex_result.json` when present, store valid decisions/evidence/test
 runs, and update queue state. Failures preserve task directories and logs for
-inspection. If interruption leaves a row in `CODEX_RUNNING`, run
-`recover-stale` before retrying.
+inspection. Codex stdout and stderr are not streamed to the terminal; they
+remain in each task's `output/logs/codex-stdout.log` and
+`output/logs/codex-stderr.log`. If interruption leaves a row in `CODEX_RUNNING`,
+run `recover-stale` before retrying.
 
 ## Recover and Retry
 

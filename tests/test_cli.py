@@ -6,7 +6,11 @@ import pytest
 from typer.testing import CliRunner
 
 from backport_harness import __version__
-from backport_harness.analysis_runner import AnalyzeBatchItemResult, AnalyzeBatchResult
+from backport_harness.analysis_runner import (
+    AnalyzeBatchItemResult,
+    AnalyzeBatchResult,
+    AnalysisProgressEvent,
+)
 from backport_harness.main import app
 from backport_harness.storage import connect, init_database
 from backport_harness.task_builder import TaskBundle
@@ -720,6 +724,52 @@ def test_analyze_limit_invokes_batch_runner(
 
     def fake_analyze_pr_batch(**kwargs):
         calls.append(kwargs)
+        progress = kwargs["progress"]
+        progress(AnalysisProgressEvent(event="batch_selected", total=2))
+        progress(
+            AnalysisProgressEvent(
+                event="pr_start",
+                pr_number=12345,
+                title="Fix compaction bug",
+                upstream_branch="master",
+                initial_queue_status="QUEUED_FOR_ANALYSIS",
+                index=1,
+                total=2,
+            )
+        )
+        progress(
+            AnalysisProgressEvent(
+                event="codex_start",
+                pr_number=12345,
+                run_id="run-1",
+                timeout_seconds=7200,
+                stdout_log_path="workspace/tasks/pr-12345/output/logs/codex-stdout.log",
+                stderr_log_path="workspace/tasks/pr-12345/output/logs/codex-stderr.log",
+                index=1,
+                total=2,
+            )
+        )
+        progress(
+            AnalysisProgressEvent(
+                event="codex_heartbeat",
+                pr_number=12345,
+                elapsed_seconds=60.0,
+                index=1,
+                total=2,
+            )
+        )
+        progress(
+            AnalysisProgressEvent(
+                event="pr_finish",
+                pr_number=12345,
+                outcome="succeeded",
+                final_queue_status="REPORTABLE",
+                exit_code=0,
+                timed_out=False,
+                index=1,
+                total=2,
+            )
+        )
         return AnalyzeBatchResult(
             selected_count=2,
             processed_count=2,
@@ -778,6 +828,10 @@ def test_analyze_limit_invokes_batch_runner(
     assert calls[0]["limit"] == 2
     assert calls[0]["max_runtime_minutes"] == 30.0
     assert calls[0]["fail_fast"] is True
+    assert "Selected 2 PR(s) for analysis." in result.output
+    assert "Starting PR #12345 (1/2)" in result.output
+    assert "still running Codex elapsed=1m 0.0s" in result.output
+    assert "Finished PR #12345 (1/2)" in result.output
     assert "Analysis Batch Summary" in result.output
     assert "Selected PRs" in result.output
     assert "#12345" in result.output
@@ -794,6 +848,18 @@ def test_analyze_pr_invokes_runner(
 
     def fake_analyze_one_pr(**kwargs):
         calls.append(kwargs)
+        progress = kwargs["progress"]
+        progress(AnalysisProgressEvent(event="pr_start", pr_number=12345))
+        progress(
+            AnalysisProgressEvent(
+                event="pr_finish",
+                pr_number=12345,
+                outcome="succeeded",
+                final_queue_status="REPORTABLE",
+                exit_code=0,
+                timed_out=False,
+            )
+        )
         return SimpleNamespace(
             run_id="run-1",
             codex_result=SimpleNamespace(exit_code=0, timed_out=False),
@@ -814,6 +880,8 @@ def test_analyze_pr_invokes_runner(
 
     assert result.exit_code == 0
     assert calls[0]["pr_number"] == 12345
+    assert "Starting PR #12345" in result.output
+    assert "Finished PR #12345" in result.output
     assert "Analyzed PR #12345 in run run-1" in result.output
     assert "exit=0" in result.output
     assert "timed_out=False" in result.output
