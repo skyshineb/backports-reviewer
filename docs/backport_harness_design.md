@@ -1,5 +1,34 @@
 # Backport Harness Design
 
+## Local commit dashboard
+
+`backport-harness serve` runs the commit workflow on loopback for one operator.
+The sections below describe the public PR CLI and its public-only boundary.
+The dashboard has an explicitly configured private-fork boundary of its own.
+
+- The operator configures a public GitHub repository, upstream branch, base
+  tag or SHA, local fork, and target branch. Defaults are `lance-format/lance`,
+  `main`, and 30 minutes. Fork roots are deployment parameters.
+- The scanner saves matching first-parent commits and the upstream cursor in
+  one SQLite transaction. It surfaces history rewrites and lets the operator
+  rescan from the base. The default subject words are `fix`, `bug`, and `bugfix`.
+- A service-owned mirror and detached worktrees isolate Git probes and patch
+  preparation. A clean, empty, or conflicting pick records the fork SHA. Only
+  conflicts enter automated analysis, limited to five starts per interval by
+  default. Scans and Codex jobs progress independently.
+- The dashboard may read the approved fork locally. Its Codex worker uses the
+  authorized OpenAI Responses API with high reasoning and bounded file reads
+  on the pinned snapshot. The worker has no command, build, test, or network
+  tools. Python validates structured results, paths, and patches. Credentials,
+  private Git objects, and audit data stay under deployment control.
+- An operator can apply a clean patch directly to the selected local branch.
+  An adaptation requires reviewing the exact diff before confirming. Writes
+  use the expected HEAD and a Git operation marker for restart recovery. A
+  branch in a user checkout or a stale adaptation requires operator action.
+- SQLite records jobs, attempts, and human decisions. The dashboard exposes
+  the timeline, settings, scan controls, retry and cancel, skip and unskip,
+  custom analysis prompts, and adaptation confirmation.
+
 ## 1. Purpose
 
 The Backport Harness is a semi-automated system for detecting upstream open-source bugfixes that may need to be backported to a private fork.

@@ -99,7 +99,7 @@ If GitHub access or push permissions are unavailable, leave the branch and commi
 - Add tests proportional to risk and behavior changed.
 - Keep deterministic Python orchestration as the source of truth.
 - Do not let Codex or any agent output become trusted without validation.
-- Preserve the project security boundary: never access private forks, private patches, private repository history, or private test results.
+- Keep the PR CLI public-only. The operator-configured local dashboard may read an approved fork for Git operations, share a pinned source snapshot with the authorized Codex provider, and write the selected local branch on operator request. Use synthetic repositories and a fake provider for development verification.
 
 ## Verification
 

@@ -1,5 +1,14 @@
 # Backport Harness Implementation Steps
 
+## Local dashboard delivery
+
+Tasks 030 through 033 add the commit workflow described in the design. Task 030
+sets the private-fork boundary before code. Task 031 adds durable discovery and
+Git probes. Task 032 adds static Codex analysis, local branch writes, and recovery.
+Task 033 adds the browser interface and end-to-end verification. Migrations
+retain the existing PR audit. Task 029 and the milestones below describe the
+public PR CLI.
+
 ## 1. Implementation goal
 
 Build a Python-based Backport Harness that:
