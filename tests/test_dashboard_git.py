@@ -89,6 +89,20 @@ def test_worktree_probe_outcomes(repositories):
     assert not list(workspace.mirror(1).parent.glob("worktree-*"))
 
 
+def test_configured_sha_on_a_release_branch(repositories):
+    upstream, _, workspace, settings, _ = repositories
+    git(upstream, "switch", "-c", "release")
+    release = commit(upstream, "release.txt", "release\n", "Release snapshot")
+    git(upstream, "switch", "main")
+    fix = commit(upstream, "main.txt", "fix\n", "Fix main path")
+    settings = settings.model_copy(update={"base_ref": release})
+
+    batch = workspace.scan(1, settings, None, None)
+
+    assert batch.base == release
+    assert [item.sha for item in batch.commits] == [fix]
+
+
 def test_fork_roots_and_git_directory_are_validated(tmp_path, repositories):
     _, fork, _, settings, _ = repositories
     workspace = GitWorkspace(tmp_path / "isolated", [tmp_path / "approved"])

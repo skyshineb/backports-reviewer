@@ -107,6 +107,18 @@ class GitWorkspace:
         self._allow(fork)
         if not fork.is_dir():
             raise ValueError("Select a directory containing the local fork.")
+        marker = fork / ".git"
+        if marker.is_dir():
+            self._allow(marker.resolve())
+        elif marker.is_file():
+            self._allow(marker.resolve())
+            with marker.open("rb") as stream:
+                pointer = stream.read(4096).decode("utf-8")
+            if not pointer.startswith("gitdir: "):
+                raise ValueError("The fork has an invalid Git directory pointer.")
+            self._allow((fork / pointer.removeprefix("gitdir: ").strip()).resolve())
+        elif not (fork / "HEAD").is_file() or not (fork / "objects").is_dir():
+            raise ValueError("Select the root directory of the local fork.")
         metadata = output(git(fork, "rev-parse", "--path-format=absolute", "--git-common-dir"))
         self._allow(Path(metadata).resolve(strict=True))
         bare = output(git(fork, "rev-parse", "--is-bare-repository")) == "true"
@@ -166,7 +178,21 @@ class GitWorkspace:
             local_transport=self.upstream_url is not None,
         )
         head = resolve_commit(mirror, "refs/backports-reviewer/upstream")
-        base = saved_base or resolve_commit(mirror, initial_ref)
+        if saved_base:
+            base = saved_base
+        else:
+            try:
+                base = resolve_commit(mirror, initial_ref)
+            except GitError:
+                if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", initial_ref):
+                    raise
+                git(
+                    mirror, "fetch", "--no-tags", "--no-write-fetch-head",
+                    "--no-auto-maintenance", "--no-recurse-submodules",
+                    url, f"+{initial_ref}:refs/backports-reviewer/base",
+                    local_transport=self.upstream_url is not None,
+                )
+                base = resolve_commit(mirror, "refs/backports-reviewer/base")
         if git(mirror, "merge-base", base, head, allowed=(0, 1)).returncode:
             if cursor:
                 raise UpstreamRewrite("Upstream no longer shares history with the saved base.")
@@ -248,7 +274,7 @@ class GitWorkspace:
         sha = resolve_commit(tree, "HEAD")
         diff = git(
             tree, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary", target, sha,
-        ).stdout.decode("utf-8", "replace")
+        ).stdout.decode("utf-8", "backslashreplace")
         git(tree, "update-ref", f"{OPERATIONS_REF}/drafts/{token}", sha)
         return PreparedPatch(target, sha, diff)
 

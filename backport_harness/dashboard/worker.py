@@ -227,7 +227,7 @@ class DashboardWorker:
             current = db.execute("SELECT status FROM dashboard_jobs WHERE id = ?", (job["id"],)).fetchone()
             if current["status"] != "committing":
                 return
-            if marker == job["prepared_sha"]:
+            if marker and marker == job["prepared_sha"]:
                 self._record_application(db, job, marker)
             else:
                 set_job(db, job["id"], status, error=error)
@@ -245,4 +245,7 @@ class DashboardWorker:
             )
             interrupted = list(db.execute("SELECT * FROM dashboard_jobs WHERE status = 'committing'"))
         for job in interrupted:
-            self._reconcile(dict(job), "failed", "Interrupted before recording the Git write. Retry the operation.")
+            self.recover_write(dict(job))
+
+    def recover_write(self, job: dict) -> None:
+        self._reconcile(job, "failed", "Interrupted before recording the Git write. Retry the operation.")

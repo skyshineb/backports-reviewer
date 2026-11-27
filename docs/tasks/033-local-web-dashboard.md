@@ -30,3 +30,11 @@ CLI entry point. Run the full test suite.
 
 The service runs for one operator on the machine hosting the fork. The browser
 uses local assets and the local service.
+
+## Illustration
+
+The empty-state asset is
+`backport_harness/dashboard/assets/drafting.webp`, generated with the built-in
+imagegen tool.
+
+> Create an original illustration-story bitmap for the empty state of an understated engineering dashboard. One adult engineer in rolled-up sleeves, quietly laying a partly rolled architectural blueprint flat on a small drawing table, shown from a three-quarter view. Render in refined hand-inked anime linework with thin contours, a little pen hatching and simple cel shadows. Use graphite ink, muted slate-blue drawing lines, warm cream clothing and a tiny muted terracotta accent. Keep the silhouette and interior detail readable at 200 pixels wide. Horizontally composed, isolated transparent background, no scenery outside the drawing table, no border. No text, no numerals, no logos, no signature.

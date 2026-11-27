@@ -1,13 +1,32 @@
 # Backports Reviewer
 
-`backports-reviewer` is a Python harness for building a public-OSS backport
-review queue. It scans public upstream GitHub pull requests, stores review state
-in SQLite, prepares public worktrees and Codex task bundles, validates Codex
-analysis output, and generates reports for human review.
+Backports Reviewer has a local commit dashboard and a public PR CLI. The
+dashboard tracks upstream fixes, checks them against an approved local fork,
+and lets an operator review and apply fixes to a selected local branch.
 
-The harness is intentionally public-only. It must not access or be configured
-with private fork paths, private repository URLs, private patches, private
-history, private business logic, or private test results.
+## Local dashboard
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[test]"
+.venv/bin/backport-harness serve --fork-root /path/containing/your/fork
+```
+
+Open the loopback URL printed by the command. In **Настройки**, choose the
+public upstream, the base tag or SHA, the local fork and the target branch.
+The first scan starts after saving. Later scans run at 30-minute intervals by
+default.
+
+Set `OPENAI_API_KEY` in the service environment to enable static Codex review
+and adaptation. A clean fix can be applied directly. An adaptation shows its
+diff and waits for confirmation. The branch must be free of user worktrees
+when the service writes it. See [local dashboard usage](docs/dashboard.md).
+
+## Public PR CLI
+
+The commands below build a public-OSS review queue from GitHub pull requests.
+They use public worktrees and public Codex task bundles. Use only public
+repository paths, URLs, source refs, and target refs in the PR CLI config.
 
 ## What It Does
 

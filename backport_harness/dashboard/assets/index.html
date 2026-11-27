@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Backports Reviewer</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  <script defer src="/assets/dashboard.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <button class="brand" type="button" data-tab="timeline" aria-label="Backports Reviewer — журнал">
+        <span class="brand-mark" aria-hidden="true"><i></i></span>
+        <span>Backports<br><b>Reviewer</b></span>
+      </button>
+      <nav aria-label="Разделы">
+        <button type="button" data-tab="timeline" aria-current="page">Журнал</button>
+        <button type="button" data-tab="queue">Очередь</button>
+        <button type="button" data-tab="settings">Настройки</button>
+      </nav>
+      <div class="connection"><span class="status-dot"></span><span id="connection">Локальный режим</span></div>
+    </div>
+  </header>
+  <main class="layout">
+    <section id="timeline" class="view" aria-labelledby="timeline-title">
+      <div class="title-block">
+        <div>
+          <div class="project-line"><span id="project-source">lance-format/lance</span><span id="project-branch">main</span></div>
+          <h1 id="timeline-title">Журнал фиксов</h1>
+        </div>
+        <dl class="source-meta" id="source-meta"></dl>
+      </div>
+      <div class="warning-strip" id="timeline-warning" hidden></div>
+      <div class="toolbar">
+        <div class="filters">
+          <label class="search"><span class="search-icon" aria-hidden="true"></span>
+            <input id="search" type="search" placeholder="Заголовок / SHA" aria-label="Поиск коммита">
+          </label>
+          <select id="filter" aria-label="Статус коммита">
+            <option value="">Все статусы</option>
+            <option value="applicable">Применим</option>
+            <option value="conflict">Конфликт</option>
+            <option value="applied">Применён</option>
+            <option value="skipped">Пропущен</option>
+            <option value="error">Ошибка</option>
+          </select>
+        </div>
+        <button id="scan-timeline" class="button" type="button" data-action="scan">Сканировать</button>
+      </div>
+      <div id="timeline-content" aria-busy="true"></div>
+    </section>
+    <section id="queue" class="view" aria-labelledby="queue-title" hidden>
+      <div class="title-block">
+        <div><h1 id="queue-title">Очередь</h1></div>
+        <dl class="source-meta" id="queue-meta"></dl>
+      </div>
+      <div class="toolbar queue-controls">
+        <button class="button primary" type="button" data-action="scan">Сканировать</button>
+        <button class="button" type="button" data-action="rescan">Обход от базы</button>
+        <button class="button" id="pause" type="button" data-action="pause">Пауза</button>
+      </div>
+      <div id="queue-content"></div>
+    </section>
+    <section id="settings" class="view" aria-labelledby="settings-title" hidden>
+      <div class="title-block"><h1 id="settings-title">Настройки</h1></div>
+      <form id="profile-form" class="settings-form">
+        <fieldset>
+          <legend>Upstream</legend>
+          <label>Публичный GitHub-репозиторий
+            <input name="upstream" placeholder="lance-format/lance" required>
+          </label>
+          <label>Ветка <input name="upstream_branch" placeholder="main" required></label>
+          <label>Базовый тег или SHA
+            <input name="base_ref" placeholder="refs/tags/…" required>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Локальный форк</legend>
+          <label>Путь к репозиторию
+            <input name="fork_path" placeholder="/path/to/fork" required>
+          </label>
+          <label>Целевая ветка
+            <input name="target_branch" placeholder="backports" required>
+          </label>
+          <p class="form-note">Для Apply освободите ветку от пользовательских worktrees.</p>
+        </fieldset>
+        <fieldset class="schedule-settings">
+          <legend>Сканирование и Codex</legend>
+          <label>Интервал, минуты <input name="interval_minutes" type="number" min="1" max="1440" required></label>
+          <label>Автоанализов за цикл <input name="analysis_limit" type="number" min="0" max="100" required></label>
+          <label class="match-field">Слова в заголовках <input name="match_words" maxlength="200" required></label>
+          <p class="form-note" id="provider-note"></p>
+        </fieldset>
+        <div class="settings-actions">
+          <button class="button primary" type="submit">Сохранить настройки</button>
+        </div>
+      </form>
+    </section>
+  </main>
+  <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+    <div class="sheet-heading">
+      <div><p class="sheet-label" id="sheet-label"></p><h2 id="sheet-title"></h2></div>
+      <form method="dialog"><button type="submit" class="close-button" aria-label="Закрыть">×</button></form>
+    </div>
+    <p id="sheet-notice" class="warning-strip" role="status" hidden></p>
+    <div id="sheet-body" class="sheet-body"></div>
+  </dialog>
+  <p id="notice" class="notice" role="status" hidden></p>
+  <noscript>Для dashboard нужен JavaScript.</noscript>
+</body>
+</html>
