@@ -17,10 +17,12 @@ public upstream, the base tag or SHA, the local fork and the target branch.
 The first scan starts after saving. Later scans run at 30-minute intervals by
 default.
 
-Set `OPENAI_API_KEY` in the service environment to enable static Codex review
-and adaptation. A clean fix can be applied directly. An adaptation shows its
-diff and waits for confirmation. The branch must be free of user worktrees
-when the service writes it. See [local dashboard usage](docs/dashboard.md).
+To reuse your local ChatGPT login for Codex review and adaptation, run
+`codex login` if needed and start the service with `--codex-backend cli`.
+The default API backend uses `OPENAI_API_KEY`. A clean fix can be applied
+directly. An adaptation shows its diff and waits for confirmation. The branch
+must be free of user worktrees when the service writes it. See
+[local dashboard usage](docs/dashboard.md).
 
 ## Public PR CLI
 

@@ -16,11 +16,14 @@ The dashboard has an explicitly configured private-fork boundary of its own.
   preparation. A clean, empty, or conflicting pick records the fork SHA. Only
   conflicts enter automated analysis, limited to five starts per interval by
   default. Scans and Codex jobs progress independently.
-- The dashboard may read the approved fork locally. Its Codex worker uses the
-  authorized OpenAI Responses API with high reasoning and bounded file reads
-  on the pinned snapshot. The worker has no command, build, test, or network
-  tools. Python validates structured results, paths, and patches. Credentials,
-  private Git objects, and audit data stay under deployment control.
+- The dashboard may read the approved fork locally. Its Codex worker uses high
+  reasoning and bounded file reads on the pinned snapshot. The operator
+  selects the authorized OpenAI Responses API or local Codex CLI session with
+  `--codex-backend`. The CLI runs from a temporary directory with a restricted
+  permission profile and an isolated MCP server for the pinned snapshot.
+  The worker has no command, build, test, or network tools. Python validates
+  structured results, paths, and patches. Credentials, private Git objects,
+  and audit data stay under deployment control.
 - An operator can apply a clean patch directly to the selected local branch.
   An adaptation requires reviewing the exact diff before confirming. Writes
   use the expected HEAD and a Git operation marker for restart recovery. A

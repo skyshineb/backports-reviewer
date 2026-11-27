@@ -18,14 +18,32 @@ to keep the Git mirror and worktrees. Keep the state local to the operator.
 The mirror holds Git objects for the configured private fork and the database
 contains prompts, diffs, and notes.
 
-The static Codex worker uses the OpenAI Responses API. Set `OPENAI_API_KEY`
-in the service process environment to activate it. The default model is
-`gpt-6.2-astra` at high reasoning effort. `--codex-model` can select another
-model that supports Responses tools, structured outputs, and high reasoning.
-This opt-in shares upstream diffs, operator guidance, and selected text from
-the pinned fork snapshot with the provider. Its only model tools list tracked
-paths and read bounded text ranges. Set a limit of zero in settings to use
-manual analysis exclusively.
+## Choose Codex authentication
+
+To use the local Codex CLI with your ChatGPT account, run these commands as the
+same OS user that runs the dashboard:
+
+```sh
+codex login status
+codex login  # only if a ChatGPT session is needed
+.venv/bin/backport-harness serve --codex-backend cli --fork-root /path/containing/your/fork
+```
+
+The CLI backend reuses the saved ChatGPT session and uses the account's default
+model at high reasoning effort, or the model chosen by `--codex-model`.
+It accepts CLI versions that support the restricted permission profile,
+output schema, and `--ignore-user-config`. Login and job execution use the
+local Codex binary. The harness supplies two read-only snapshot tools and
+validates the resulting JSON.
+
+The default `--codex-backend api` uses the OpenAI Responses API. Set
+`OPENAI_API_KEY` in the service process environment to activate it. Its
+default model is `gpt-6.2-astra` at high reasoning effort. `--codex-model`
+can select a model that supports Responses tools and structured outputs.
+
+The selected provider receives the upstream diff, operator guidance, and
+selected text from the pinned fork snapshot. Set a limit of zero in settings
+to use manual analysis exclusively.
 
 ## Review and apply
 

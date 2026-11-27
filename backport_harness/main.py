@@ -20,6 +20,7 @@ from backport_harness.commands.review import render_review
 from backport_harness.commands.retry import render_retry
 from backport_harness.config import DEFAULT_ANALYSIS_LIMIT
 from backport_harness.config import HarnessConfig, load_config
+from backport_harness.dashboard.models import CodexBackendName
 from backport_harness.logging_config import configure_logging
 from backport_harness.scanner import scan_pull_requests
 from backport_harness.state_machine import (
@@ -76,20 +77,25 @@ def serve(
     ),
     state_dir: Path = typer.Option(Path("workspace/dashboard"), "--state-dir", help="Private Git and worktree storage."),
     database: Optional[Path] = typer.Option(None, "--database", help="Dashboard and PR SQLite database."),
+    codex_backend: CodexBackendName = typer.Option(
+        CodexBackendName.API, "--codex-backend", help="Use the Responses API or the local Codex ChatGPT session."
+    ),
     codex_model: Optional[str] = typer.Option(None, "--codex-model", help="OpenAI reasoning model for the static worker."),
 ) -> None:
     """Run the local dashboard for upstream commits and an approved fork."""
-    from backport_harness.dashboard.codex import DEFAULT_MODEL
     from backport_harness.dashboard.web import serve as run_dashboard
 
+    config = ctx.obj["config"]
     try:
         run_dashboard(
             database or _resolve_sqlite_path(ctx),
             state_dir,
             fork_root or [Path("workspace/forks")],
             port,
-            codex_model or DEFAULT_MODEL,
+            codex_model,
             lambda url: typer.echo(f"Dashboard  {url}"),
+            codex_backend=codex_backend,
+            codex_config=config.codex if config else None,
         )
     except KeyboardInterrupt:
         typer.echo("Dashboard stopped.")

@@ -18,9 +18,11 @@ from urllib.parse import parse_qs, urlsplit
 
 from pydantic import ValidationError
 
-from backport_harness.dashboard.codex import StaticCodex
+from backport_harness.config import CodexConfig
+from backport_harness.dashboard.codex import DEFAULT_MODEL, CodexBackend, StaticCodex
+from backport_harness.dashboard.codex_cli import StaticCliCodex
 from backport_harness.dashboard.git import GitError, GitWorkspace, branch_ref, resolve_commit
-from backport_harness.dashboard.models import ProfileSettings
+from backport_harness.dashboard.models import CodexBackendName, ProfileSettings
 from backport_harness.dashboard.store import ActionError, DashboardStore, current_job
 from backport_harness.dashboard.worker import DashboardWorker
 
@@ -53,10 +55,14 @@ def recommendation(row: dict) -> str | None:
 class DashboardHTTP(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, port: int, worker: DashboardWorker, token: str | None = None) -> None:
+    def __init__(
+        self, port: int, worker: DashboardWorker, token: str | None = None, *,
+        codex_backend: CodexBackendName = CodexBackendName.API,
+    ) -> None:
         self.worker = worker
         self.store = worker.store
         self.token = token or secrets.token_urlsafe(32)
+        self.codex_backend = codex_backend
         super().__init__(("127.0.0.1", port), DashboardHandler)
         self.host_header = f"127.0.0.1:{self.server_port}"
         self.origin = "http://" + self.host_header
@@ -67,7 +73,10 @@ class DashboardHTTP(ThreadingHTTPServer):
 
     def overview(self, query: dict) -> dict:
         profile = self.store.active_profile()
-        data = {"profile": profile, "codex_available": self.worker.codex.available, "commits": []}
+        data = {
+            "profile": profile, "codex_available": self.worker.codex.available,
+            "codex_backend": self.codex_backend.value, "commits": [],
+        }
         if not profile:
             return data
         fork_head = None
@@ -358,17 +367,28 @@ def service_lock(database: Path):
         yield
 
 
-def serve(database: Path, state: Path, roots: list[Path], port: int, model: str, announce) -> None:
+def serve(
+    database: Path, state: Path, roots: list[Path], port: int, model: str | None, announce, *,
+    codex_backend: CodexBackendName = CodexBackendName.API, codex_config: CodexConfig | None = None,
+) -> None:
     database = database.resolve()
     state = state.resolve()
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if codex_backend == CodexBackendName.CLI:
+        codex: CodexBackend
+        if codex_config:
+            codex = StaticCliCodex(codex_config.command, model, codex_config.timeout_seconds)
+        else:
+            codex = StaticCliCodex(model=model)
+    else:
+        codex = StaticCodex(os.environ.get("OPENAI_API_KEY"), model or DEFAULT_MODEL)
     with service_lock(database):
         database_key = hashlib.sha256(os.fsencode(database)).hexdigest()[:24]
         worker = DashboardWorker(
             DashboardStore(database), GitWorkspace(state / "git" / database_key, roots),
-            StaticCodex(os.environ.get("OPENAI_API_KEY"), model),
+            codex,
         )
-        with DashboardHTTP(port, worker) as server:
+        with DashboardHTTP(port, worker, codex_backend=codex_backend) as server:
             worker.start()
             try:
                 announce(server.launch_url)

@@ -5,7 +5,7 @@ import logging
 import sqlite3
 import threading
 
-from backport_harness.dashboard.codex import Adaptation, CodexError, JobCanceled, Review, Snapshot, StaticCodex
+from backport_harness.dashboard.codex import Adaptation, CodexBackend, CodexError, JobCanceled, Review, Snapshot
 from backport_harness.dashboard.git import GitError, GitWorkspace, StalePatch, UpstreamRewrite
 from backport_harness.dashboard.models import PreparedPatch, ProfileSettings
 from backport_harness.dashboard.store import DashboardStore, IN_PROGRESS, enqueue, profile_settings, set_job
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class DashboardWorker:
-    def __init__(self, store: DashboardStore, workspace: GitWorkspace, codex: StaticCodex) -> None:
+    def __init__(self, store: DashboardStore, workspace: GitWorkspace, codex: CodexBackend) -> None:
         self.store = store
         self.workspace = workspace
         self.codex = codex
@@ -47,7 +47,7 @@ class DashboardWorker:
             self._stop.wait(0.5)
 
     def run_next(self, lane: str) -> bool:
-        job = self.store.claim(lane, codex_available=self.codex.available)
+        job = self.store.claim(lane, codex_available=self.codex.available if lane == "codex" else True)
         if not job:
             return False
         with self.store.transaction() as db:

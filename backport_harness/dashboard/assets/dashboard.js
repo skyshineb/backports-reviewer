@@ -249,8 +249,13 @@ async function refresh(poll = false) {
     if (request !== generation) return;
     project = data;
     updateHeader(data);
-    $("provider-note").textContent = data.codex_available ? "Провайдер Codex настроен."
-      : "Для анализа Codex задайте OPENAI_API_KEY при запуске сервиса.";
+    if (data.codex_backend === "cli") {
+      $("provider-note").textContent = data.codex_available ? "Codex CLI подключён через ChatGPT."
+        : "Для анализа установите Codex CLI и войдите через codex login.";
+    } else {
+      $("provider-note").textContent = data.codex_available ? "Провайдер Codex настроен."
+        : "Для API задайте OPENAI_API_KEY. Для входа через ChatGPT используйте serve --codex-backend cli.";
+    }
     if (activePage === "timeline") {
       const next = JSON.stringify([data.profile?.id, data.commits, data.total, timelinePage, params.toString()]);
       if (next !== signature) renderTimeline(data);

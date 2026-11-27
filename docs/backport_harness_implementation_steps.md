@@ -9,6 +9,9 @@ Task 033 adds the browser interface and end-to-end verification. Migrations
 retain the existing PR audit. Task 029 and the milestones below describe the
 public PR CLI.
 
+Task 034 adds optional reuse of the operator's Codex ChatGPT session. It uses
+the same bounded snapshot and structured result contract as the API backend.
+
 ## 1. Implementation goal
 
 Build a Python-based Backport Harness that:
