@@ -72,7 +72,7 @@ def test_init_database_can_be_rerun_safely(tmp_path: Path) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
 
-    assert rows == [("001_initial.sql",)]
+    assert rows == [("001_initial.sql",), ("002_commit_dashboard.sql",)]
 
 
 def test_init_database_rejects_pre_0_1_schema(tmp_path: Path) -> None:

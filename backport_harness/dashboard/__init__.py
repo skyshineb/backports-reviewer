@@ -1,0 +1,1 @@
+"""Local commit review workflow."""
